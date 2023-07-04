@@ -1,5 +1,6 @@
 #lang racket/base
 (require racket/contract "pkg.rkt" racket/match)
+(provide install-Lvar)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
