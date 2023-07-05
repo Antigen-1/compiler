@@ -12,6 +12,7 @@
                                             (op (name) (and/c tag? (not/c (lambda (op) (retrieve name op)))))
                                             (proc procedure?))
                                            any)))
+                       (get-contract (-> (and/c tag? installed?) any))
 
                        (apply-generic (opt/c (->i ((op (name) (and/c tag? (lambda (op) (retrieve name op))))
                                                    (name (and/c tag? installed?))
