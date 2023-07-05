@@ -1,6 +1,6 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" racket/match)
-(provide install-Lvar)
+(require racket/contract "pkg.rkt" racket/match racket/list)
+(provide install-Lvar install-Lvar_mon)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
@@ -8,11 +8,12 @@
 ;;Lvar
 ;;------------------------------------------------------------------------------------
 (define (install-Lvar)
-  (define form/c
+  (define form?
     (opt/c
      (recursive-contract
-      (or/c fixnum? (list/c 'read) (list/c '- form/c) (list/c '- form/c form/c) (list/c '+ form/c form/c) symbol?
-            (list/c 'let (list/c (list/c symbol? form/c)) form/c)))))
+      (or/c fixnum? (list/c 'read) symbol?
+            (list/c '- form?) (list/c '- form? form?) (list/c '+ form? form?)
+            (list/c 'let (list/c (list/c symbol? form?)) form?)))))
   
   (define (Lvar-interpret form)
     (eval form (make-base-namespace)))
@@ -26,6 +27,7 @@
     (string->symbol (symbol->string (gensym s))))
   (define (primitive? v) (or (symbol? v) (fixnum? v) (equal? v '(read))))
   
+  #; (-> Lvar |restricted Lvar|)
   (define (uniquify form (table (hasheq)))
     (match form
       ((list 'let (list (list v e)) f)
@@ -37,6 +39,7 @@
       ((list '- form1 form2) (list '- (uniquify form1 table) (uniquify form2 table)))
       ((list '+ form1 form2) (list '+ (uniquify form1 table) (uniquify form2 table)))
       (v (reference v table))))
+  #; (-> Lvar Lvar_mon)
   (define (remove-complex-operands form)
     (match form
       ((list 'let (list (list v e)) f)
@@ -66,5 +69,33 @@
                                  (list op nv1 nv2)))))))
       (v v)))
 
-  (install-language 'Lvar form/c Lvar-interpret (cons 'uniquify uniquify) (cons 'remove-complex-operands remove-complex-operands)))
+  (install-language 'Lvar form? Lvar-interpret (cons 'uniquify uniquify) (cons 'remove-complex-operands remove-complex-operands)))
+;;------------------------------------------------------------------------------------
+
+;;Lvar_mon
+;;------------------------------------------------------------------------------------
+(define (install-Lvar_mon)
+  (define primitive? (or/c symbol? fixnum?))
+  (define atomic? (or/c primitive? (list/c '- primitive?) (list/c '- primitive? primitive?) (list/c '+ primitive? primitive?) (list/c 'read)))
+  (define form? (opt/c (recursive-contract (or/c atomic? (list/c 'let (list/c (list/c symbol? form?)) form?)))))
+
+  (define (Lvar_mon-interpret form)
+    (eval form (make-base-namespace)))
+  
+  #; (-> Lvar_mon Cvar)
+  (define (explicate-control form)
+    (let-values (((former latter)
+                  (split-at-right
+                   (let loop ((form form))
+                     (match form
+                       ((list 'let (list (list v e)) f)
+                        (if (atomic? e)
+                            (cons (list 'define v e) (loop f))
+                            (let-values (((former latter) (split-at-right (loop e) 1)))
+                              (append former (cons (list 'define v (car latter)) (loop f))))))
+                       (v (list v))))
+                   1)))
+      (list 'program (list 'start (append former (list (cons 'return latter)))))))
+
+  (install-language 'Lvar_mon form? Lvar_mon-interpret (cons 'explicate-control explicate-control)))
 ;;------------------------------------------------------------------------------------
