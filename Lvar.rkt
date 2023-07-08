@@ -1,13 +1,15 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" racket/match)
+(require racket/contract "pkg.rkt" racket/match (for-syntax racket/base racket/syntax))
 (provide install-Lvar install-Lvar_mon)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
 
+(define-syntax-rule (pairify id ...) (list (cons 'id id) ...))
+
 ;;Lvar
 ;;------------------------------------------------------------------------------------
-;;contracts for Lvar and Lvar_mon
+;;common contracts
 (define primitive? (or/c symbol? fixnum?))
 (define atomic?
   (or/c primitive?
@@ -26,8 +28,7 @@
     (eval form (make-base-namespace)))
 
   (define (reference v t)
-    (cond ((and (symbol? v) (hash-ref t v #f)))
-          ((symbol? v) (raise (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks))))
+    (cond ((symbol? v) (hash-ref t v (lambda () (raise (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks))))))
           (else v)))
   (define (n:gensym s)
     (string->symbol (symbol->string (gensym s))))
@@ -71,7 +72,7 @@
                                (list 'let (list (list nv2 (remove-complex-operands form2)))
                                      (list op nv1 nv2))))))))))
 
-  (install-language 'Lvar form? Lvar-interpret (cons 'uniquify uniquify) (cons 'remove-complex-operands remove-complex-operands)))
+  (apply install-language 'Lvar form? Lvar-interpret (pairify uniquify remove-complex-operands)))
 ;;------------------------------------------------------------------------------------
 
 ;;Lvar_mon
@@ -95,5 +96,70 @@
                     (append (loop v e) (loop ret f))))))))
       (list 'program (list 'start seq))))
 
-  (install-language 'Lvar_mon mon? Lvar_mon-interpret (cons 'explicate-control explicate-control)))
+  (apply install-language 'Lvar_mon mon? Lvar_mon-interpret (pairify explicate-control)))
+;;------------------------------------------------------------------------------------
+
+;;Cvar
+;;------------------------------------------------------------------------------------
+(define (install-Cvar)
+  (define assign? (list/c 'define symbol? atomic?))
+  (define tail? (list/c 'return atomic?))
+  (define Cvar?
+    (opt/c (cons/c 'program (listof (list/c symbol? (*list/c assign? tail?))))))
+
+  (define (Cvar-interpret form)
+    (define ns (make-base-namespace))
+    (eval '(define-syntax-rule (return v) v) ns)
+    (match form
+      ((cons 'program (list-no-order (list 'start (list statement ...)) _ ...))
+       (eval (cons 'begin statement) ns))))
+
+  #; (-> Cvar Cvar)
+  (define (opt:partial-evaluation form)
+    (define (simplify expr table)
+      (define (reference p)
+        (cond ((symbol? p) (hash-ref table p #f)) (else p)))
+      (define-syntax (handle stx)
+        (syntax-case stx ()
+          ((_ h p ...)
+           (with-syntax (((np ...) (map generate-temporary (syntax->datum #'(p ...)))))
+             #'(let ((np (reference p)) ...)
+                 (if (and np ...)
+                     (h np ...)
+                     (cons 'h
+                           (map
+                            (lambda (r o) (or r o))
+                            (list np ...) (list p ...)))))))))
+      (match expr
+        ((list '+ p1 p2)
+         (handle + p1 p2))
+        ((list '- p)
+         (handle - p))
+        ((list '- p1 p2)
+         (handle - p1 p2))
+        ((list 'read)
+         (list 'read))
+        (p (cond ((reference p)) (else p)))))
+    (define (optimize statement table)
+      (cond ((tail? statement)
+             (list 'return (simplify (cadr statement) table)))
+            (else
+             (define r (simplify (caddr statement) table))
+             (if (primitive? r)
+                 (hash-set table (cadr statement) r)
+                 (list 'define (cadr statement) r)))))
+    (cons 'program
+          (map
+           (lambda (block)
+             (list (car block)
+                   (let-values (((t r)
+                                 (for/fold ((table (hasheq)) (result null))
+                                           ((statement (in-list (cadr block))))
+                                   (define r (optimize statement table))
+                                   (cond ((hash? r) (values r result))
+                                         (else (values table (cons r result)))))))
+                     (reverse r))))
+           (cdr form))))
+  
+  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify opt:partial-evaluation)))
 ;;------------------------------------------------------------------------------------
