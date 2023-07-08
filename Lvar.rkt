@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/contract "pkg.rkt" racket/match (for-syntax racket/base racket/syntax))
-(provide install-Lvar install-Lvar_mon)
+(provide install-Lvar install-Lvar_mon install-Cvar)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
@@ -115,7 +115,7 @@
        (eval (cons 'begin statement) ns))))
 
   #; (-> Cvar Cvar)
-  (define (opt:partial-evaluation form)
+  (define (partial-evaluate form)
     (define (simplify expr table)
       (define (reference p)
         (cond ((symbol? p) (hash-ref table p #f)) (else p)))
@@ -145,6 +145,9 @@
              (list 'return (simplify (cadr statement) table)))
             (else
              (define r (simplify (caddr statement) table))
+             ;;`(define <var> <var>)` forms are also removed from the sequence
+             ;;so that I don't need a `patch_instructions` pass.
+             ;;Of course, it is not necessary for typical partial evaluators to implement this feature
              (if (primitive? r)
                  (hash-set table (cadr statement) r)
                  (list 'define (cadr statement) r)))))
@@ -161,5 +164,5 @@
                      (reverse r))))
            (cdr form))))
   
-  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify opt:partial-evaluation)))
+  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate)))
 ;;------------------------------------------------------------------------------------
