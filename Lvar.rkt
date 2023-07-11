@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" racket/match (for-syntax racket/base racket/syntax))
+(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/list (for-syntax racket/base racket/syntax))
 (provide install-Lvar install-Lvar_mon install-Cvar)
 
 (define (install-language name contract interpreter . passes)
@@ -102,6 +102,8 @@
 ;;Cvar
 ;;------------------------------------------------------------------------------------
 (define (install-Cvar)
+  (install-x86-instruction)
+  
   (define assign? (list/c 'define symbol? atomic?))
   (define tail? (list/c 'return atomic?))
   (define Cvar?
@@ -115,6 +117,7 @@
        (eval (cons 'begin statement) ns))))
 
   #; (-> Cvar Cvar)
+  ;; An optional optimization
   (define (partial-evaluate form)
     (define (simplify expr table)
       (define (reference p)
@@ -145,9 +148,8 @@
              (list 'return (simplify (cadr statement) table)))
             (else
              (define r (simplify (caddr statement) table))
-             ;;`(define <var> <var>)` forms are also removed from the sequence
-             ;;so that I don't need a `patch_instructions` pass.
-             ;;Of course, it is not necessary for typical partial evaluators to implement this feature
+             ;; Of course, it is unnecessary for typical partial evaluators to remove `(define <var> <var>)` from the sequence.
+             ;; But I don't want to write another similar optimizer.
              (if (primitive? r)
                  (hash-set table (cadr statement) r)
                  (list 'define (cadr statement) r)))))
@@ -163,6 +165,63 @@
                                          (else (values table (cons r result)))))))
                      (reverse r))))
            (cdr form))))
+  (define (select-instructions form)
+    (define (format-instruction template . args)
+      (apply apply-generic 'format-instruction 'x86-instruction-template template args))
+    (define (instruction->string ins)
+      (apply-generic 'instruction->string 'x86-instruction ins))
+    (define gen (generator () (let loop ((i -8))
+                                (yield i)
+                                (loop (- i 8)))))
+    (define (handle ret expr table)
+      (define (reference v)
+        (hash-ref table v (lambda () (raise (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks))))))
+
+      (define (make-address l) (cons l 'rbx))
+      
+      (define (stash i) (format-instruction '(movq ~i %rax) i))
+      (define (load l) (format-instruction '(movq ~a %rax) l))
+      (define (load-and-handle h l) (format-instruction '(~c ~a %rax) h l))
+      (define (handle-immediate-data h i) (format-instruction '(~c ~i %rax) h i))
+      (define (unstash l) (format-instruction '(movq %rax ~a) l))
+
+      (define il
+        (match expr
+          ((list op p1 p2)
+           (let ((ins (if (eq? op '+) 'addq 'subq)))
+             (list (if (symbol? p1) (load (reference p1)) (stash p1))
+                   ((if (symbol? p2) load-and-handle handle-immediate-data)
+                    ins (if (symbol? p2) (reference p2) p2)))))
+          ((list '- p)
+           (list
+            (if (symbol? p)
+                (load (reference p))
+                (stash p))
+            (list 'negq '%rax)))
+          ((list 'read)
+           (list (list 'callq 'read_int)))
+          (v (if (symbol? v) (list (load (reference v))) (list (stash v))))))
+      
+      (if ret
+          (let ((na (make-address (gen))))
+            (values (hash-set table ret na) (append il (list (unstash na)))))
+          (values table il)))
+
+    (match form
+      ((cons 'program (list-no-order (list 'start (list statement ...)) _ ...))
+       (list 'program
+             (map
+              instruction->string
+              (flatten
+               (reverse
+                (car
+                 (foldl
+                  (lambda (st ac)
+                    (define-values (t l)
+                      (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
+                            (else (handle (cadr st) (caddr st) (cdr ac)))))
+                    (cons (cons l (car ac)) t))
+                  (cons null (hasheq)) statement)))))))))
   
-  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate)))
+  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
 ;;------------------------------------------------------------------------------------
