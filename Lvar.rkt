@@ -113,8 +113,8 @@
     (define ns (make-base-namespace))
     (eval '(define-syntax-rule (return v) v) ns)
     (match form
-      ((cons 'program (list-no-order (list 'start (list statement ...)) _ ...))
-       (eval (cons 'begin statement) ns))))
+      ((cons 'program (list-no-order (list 'start statements) _ ...))
+       (eval (cons 'begin statements) ns))))
 
   #; (-> Cvar Cvar)
   ;; An optional optimization
@@ -208,20 +208,42 @@
           (values table il)))
 
     (match form
-      ((cons 'program (list-no-order (list 'start (list statement ...)) _ ...))
+      ((cons 'program (list-no-order (list 'start statements) _ ...))
        (list 'program
-             (map
-              instruction->string
-              (flatten
-               (reverse
-                (car
-                 (foldl
-                  (lambda (st ac)
-                    (define-values (t l)
-                      (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
-                            (else (handle (cadr st) (caddr st) (cdr ac)))))
-                    (cons (cons l (car ac)) t))
-                  (cons null (hasheq)) statement)))))))))
+             (list
+              'start
+              (map
+               instruction->string
+               (apply
+                append
+                (reverse
+                 (car
+                  (foldl
+                   (lambda (st ac)
+                     (define-values (t l)
+                       (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
+                             (else (handle (cadr st) (caddr st) (cdr ac)))))
+                     (cons (cons l (car ac)) t))
+                   (cons null (hasheq)) statements))))))))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
+;;------------------------------------------------------------------------------------
+
+;;All
+;;------------------------------------------------------------------------------------
+(define (install-All)
+  (install 'Lvar-compiler (listof (list/c (and/c tag? installed?) tag?))
+           (cons 'make-Lvar-compiler
+                 (lambda (l)
+                   (lambda (i) (foldl (lambda (p i) (apply-generic (cadr p) (car p) i)) i l)))))
+  (install-Lvar)
+  (install-Lvar_mon)
+  (install-Cvar)
+  
+  (apply-generic 'make-Lvar-compiler 'Lvar-compiler
+                 (list (list 'Lvar 'uniquify)
+                       (list 'Lvar 'remove-complex-operands)
+                       (list 'Lvar_mon 'explicate-control)
+                       (list 'Cvar 'partial-evaluate)
+                       (list 'Cvar 'select-instructions))))
 ;;------------------------------------------------------------------------------------
