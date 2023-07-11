@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/list (for-syntax racket/base racket/syntax))
-(provide install-Lvar install-Lvar_mon install-Cvar)
+(provide install-Lvar install-Lvar_mon install-Cvar install-All)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
