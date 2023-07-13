@@ -252,18 +252,21 @@
 ;;All
 ;;------------------------------------------------------------------------------------
 (define (install-All)
-  (install 'Lvar-compiler (listof (list/c (and/c tag? installed?) tag?))
+  (install 'Lvar-compiler (listof (list/c (and/c tag? installed?) tag? boolean?))
            (cons 'make-Lvar-compiler
                  (lambda (l)
-                   (lambda (i) (foldl (lambda (p i) (apply-generic (cadr p) (car p) i)) i l)))))
+                   (lambda (i f)
+                     (foldl
+                      (lambda (p i) (if (or f (caddr p)) (apply-generic (cadr p) (car p) i) i))
+                      i l)))))
   (install-Lvar)
   (install-Lvar_mon)
   (install-Cvar)
   
   (apply-generic 'make-Lvar-compiler 'Lvar-compiler
-                 (list (list 'Lvar 'uniquify)
-                       (list 'Lvar 'remove-complex-operands)
-                       (list 'Lvar_mon 'explicate-control)
-                       (list 'Cvar 'partial-evaluate)
-                       (list 'Cvar 'select-instructions))))
+                 (list (list 'Lvar 'uniquify #t)
+                       (list 'Lvar 'remove-complex-operands #t)
+                       (list 'Lvar_mon 'explicate-control #t)
+                       (list 'Cvar 'partial-evaluate #f)
+                       (list 'Cvar 'select-instructions #t))))
 ;;------------------------------------------------------------------------------------
