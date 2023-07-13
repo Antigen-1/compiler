@@ -286,11 +286,10 @@
     (apply-generic 'instruction->string 'x86-instruction ins))
   
   (define (make-text form)
-    (define (prefix symbol) (if (eq? (system-type 'os) 'macosx) (string->symbol (string-append "_" (symbol->string symbol))) symbol))
-    (define (handle-block block) (string-append (~a (prefix (car block))) ":\n"
+    (define (handle-block block) (string-append (~a (car block)) ":\n"
                                                 (string-join #:before-first " " (map instruction->string (cadr block)))))
     (string-append* (cons
-                     (format ".global ~a\n" (prefix 'main))
+                     ".global main\n"
                      (map handle-block (cdr form)))))
   
   (apply install 'X86raw form? (pairify make-text)))
