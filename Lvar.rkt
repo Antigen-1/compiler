@@ -1,6 +1,6 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list (for-syntax racket/base racket/syntax))
-(provide install-Lvar install-Lvar_mon install-Cvar install-All)
+(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list racket/string racket/format (for-syntax racket/base racket/syntax))
+(provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
@@ -188,8 +188,6 @@
   (define (select-instructions form)
     (define (format-instruction template . args)
       (apply apply-generic 'format-instruction 'x86-instruction-template template args))
-    (define (instruction->string ins)
-      (apply-generic 'instruction->string 'x86-instruction ins))
     (define gen (generator () (let loop ((i -8))
                                 (yield i)
                                 (loop (- i 8)))))
@@ -236,41 +234,66 @@
         (cons
          (list
           'start
-          (map
-           instruction->string
-           (apply
-            append
-            (reverse
-             (cons
-              (list (jump 'conclusion))
-              (car
-               (foldl
-                (lambda (st ac)
-                  (define-values (t l)
-                    (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
-                          (else (handle (cadr st) (caddr st) (cdr ac)))))
-                  (cons (cons l (car ac)) t))
-                (cons null (hasheq)) statements)))))))
+          (apply
+           append
+           (reverse
+            (cons
+             (list (jump 'conclusion))
+             (car
+              (foldl
+               (lambda (st ac)
+                 (define-values (t l)
+                   (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
+                         (else (handle (cadr st) (caddr st) (cdr ac)))))
+                 (cons (cons l (car ac)) t))
+               (cons null (hasheq)) statements))))))
          (let ((stack-size
                 (let-values (((q r) (quotient/remainder (abs (+ (gen) 8)) 16)))
                   (* 16 (if (zero? r) q (add1 q))))))
            (list
             (list
              'main
-             (map
-              instruction->string
-              (list '(pushq %rbp)
-                    '(movq %rsp %rbp)
-                    (list 'subq stack-size '%rsp)
-                    (jump 'start))))
+             (list '(pushq %rbp)
+                   '(movq %rsp %rbp)
+                   (list 'subq stack-size '%rsp)
+                   (jump 'start)))
             (list
              'conclusion
-             (map instruction->string
-                  (list (list 'addq stack-size '%rsp)
-                        '(popq %rbp)
-                        '(retq)))))))))))
+             (list (list 'addq stack-size '%rsp)
+                   '(popq %rbp)
+                   '(retq))))))))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
+;;------------------------------------------------------------------------------------
+
+;;X86raw
+;;------------------------------------------------------------------------------------
+(define (install-X86raw)
+  (cond ((not (installed? 'x86-instruction)) (install-x86-instruction)))
+
+  (define block? (list/c symbol? (listof (get-contract 'x86-instruction))))
+  (define form?
+    (opt/c
+     (cons/c
+      'program
+      (and/c (listof block?)
+             (lambda (ls)
+               (match ls
+                 ((list-no-order (list 'main _) (list 'start _) (list 'conclusion _)) #t)
+                 (_ #f)))))))
+  
+  (define (instruction->string ins)
+    (apply-generic 'instruction->string 'x86-instruction ins))
+  
+  (define (make-text form)
+    (define (prefix symbol) (if (eq? (system-type 'os) 'macosx) (string->symbol (string-append "_" (symbol->string symbol))) symbol))
+    (define (handle-block block) (string-append (~a (prefix (car block))) ":\n"
+                                                (string-join #:before-first " " (map instruction->string (cadr block)))))
+    (string-append* (cons
+                     (format ".global ~a\n" (prefix 'main))
+                     (map handle-block (cdr form)))))
+  
+  (apply install 'X86raw form? (pairify make-text)))
 ;;------------------------------------------------------------------------------------
 
 ;;All
@@ -286,11 +309,13 @@
   (install-Lvar)
   (install-Lvar_mon)
   (install-Cvar)
+  (install-X86raw)
   
   (apply-generic 'make-Lvar-compiler 'Lvar-compiler
                  (list (list 'Lvar 'uniquify #t)
                        (list 'Lvar 'remove-complex-operands #t)
                        (list 'Lvar_mon 'explicate-control #t)
                        (list 'Cvar 'partial-evaluate #f)
-                       (list 'Cvar 'select-instructions #t))))
+                       (list 'Cvar 'select-instructions #t)
+                       (list 'X86raw 'make-text #t))))
 ;;------------------------------------------------------------------------------------
