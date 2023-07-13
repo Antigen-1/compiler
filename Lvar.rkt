@@ -107,13 +107,13 @@
   (define assign? (list/c 'define symbol? atomic?))
   (define tail? (list/c 'return atomic?))
   (define Cvar?
-    (opt/c (cons/c 'program (listof (list/c symbol? (*list/c assign? tail?))))))
+    (opt/c (list/c 'program (list/c 'start (*list/c assign? tail?)))))
 
   (define (Cvar-interpret form)
     (define ns (make-base-namespace))
     (eval '(define-syntax-rule (return v) v) ns)
     (match form
-      ((cons 'program (list-no-order (list 'start statements) _ ...))
+      ((list 'program (list 'start statements))
        (eval (cons 'begin statements) ns))))
 
   #; (-> Cvar Cvar)
@@ -125,7 +125,7 @@
     ;;<dynamic>: (or/c #f (and/c (not/c fixnum?) atomic?))
     (define sequence
       (match form
-        ((cons 'program (list-no-order (list 'start statements) _ ...))
+        ((list 'program (list 'start statements))
          (define (reference d v) (dict-ref d v (lambda () (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks)))))
          (define (trace d s)
            (let ((v (reference d s)))
@@ -228,7 +228,7 @@
           (values table il)))
 
     (match form
-      ((cons 'program (list-no-order (list 'start statements) _ ...))
+      ((list 'program (list 'start statements))
        (list 'program
              (list
               'start
