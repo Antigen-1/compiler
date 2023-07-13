@@ -227,24 +227,48 @@
             (values (hash-set table ret na) (append il (list (unstash na)))))
           (values table il)))
 
+    (define (jump l) (format-instruction '(jmp ~l) l))
+    
     (match form
       ((list 'program (list 'start statements))
-       (list 'program
-             (list
-              'start
-              (map
-               instruction->string
-               (apply
-                append
-                (reverse
-                 (car
-                  (foldl
-                   (lambda (st ac)
-                     (define-values (t l)
-                       (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
-                             (else (handle (cadr st) (caddr st) (cdr ac)))))
-                     (cons (cons l (car ac)) t))
-                   (cons null (hasheq)) statements))))))))))
+       (cons
+        'program
+        (cons
+         (list
+          'start
+          (map
+           instruction->string
+           (apply
+            append
+            (reverse
+             (cons
+              (list (jump 'conclusion))
+              (car
+               (foldl
+                (lambda (st ac)
+                  (define-values (t l)
+                    (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
+                          (else (handle (cadr st) (caddr st) (cdr ac)))))
+                  (cons (cons l (car ac)) t))
+                (cons null (hasheq)) statements)))))))
+         (let ((stack-size
+                (let-values (((q r) (quotient/remainder (abs (+ (gen) 8)) 16)))
+                  (* 16 (if (zero? r) q (add1 q))))))
+           (list
+            (list
+             'main
+             (map
+              instruction->string
+              (list '(pushq %rbp)
+                    '(movq %rsp %rbp)
+                    (list 'subq stack-size '%rsp)
+                    (jump 'start))))
+            (list
+             'conclusion
+             (map instruction->string
+                  (list (list 'addq stack-size '%rsp)
+                        '(popq %rbp)
+                        '(retq)))))))))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
 ;;------------------------------------------------------------------------------------
