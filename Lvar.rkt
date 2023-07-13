@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/list (for-syntax racket/base racket/syntax))
+(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list (for-syntax racket/base racket/syntax))
 (provide install-Lvar install-Lvar_mon install-Cvar install-All)
 
 (define (install-language name contract interpreter . passes)
@@ -119,52 +119,72 @@
   #; (-> Cvar Cvar)
   ;; An optional optimization
   (define (partial-evaluate form)
-    (define (simplify expr table)
-      (define (reference p)
-        (cond ((symbol? p) (hash-ref table p #f)) (else p)))
-      (define-syntax (handle stx)
-        (syntax-case stx ()
-          ((_ h p ...)
-           (with-syntax (((np ...) (map generate-temporary (syntax->datum #'(p ...)))))
-             #'(let ((np (reference p)) ...)
-                 (if (and np ...)
-                     (h np ...)
-                     (cons 'h
-                           (map
-                            (lambda (r o) (or r o))
-                            (list np ...) (list p ...)))))))))
-      (match expr
-        ((list '+ p1 p2)
-         (handle + p1 p2))
-        ((list '- p)
-         (handle - p))
-        ((list '- p1 p2)
-         (handle - p1 p2))
-        ((list 'read)
-         (list 'read))
-        (p (cond ((reference p)) (else p)))))
-    (define (optimize statement table)
-      (cond ((tail? statement)
-             (list 'return (simplify (cadr statement) table)))
-            (else
-             (define r (simplify (caddr statement) table))
-             ;; Of course, it is unnecessary for typical partial evaluators to remove `(define <var> <var>)` from the sequence.
-             ;; But I don't want to write another similar optimizer.
-             (if (primitive? r)
-                 (hash-set table (cadr statement) r)
-                 (list 'define (cadr statement) r)))))
-    (cons 'program
-          (map
-           (lambda (block)
-             (list (car block)
-                   (let-values (((t r)
-                                 (for/fold ((table (hasheq)) (result null))
-                                           ((statement (in-list (cadr block))))
-                                   (define r (optimize statement table))
-                                   (cond ((hash? r) (values r result))
-                                         (else (values table (cons r result)))))))
-                     (reverse r))))
-           (cdr form))))
+    ;;assoc: (list/c <var> <static> <dynamic>)
+    ;;<var>: symbol?
+    ;;<static>: fixnum?
+    ;;<dynamic>: (or/c #f (and/c (not/c fixnum?) atomic?))
+    (define sequence
+      (match form
+        ((cons 'program (list-no-order (list 'start statements) _ ...))
+         (define (reference d v) (dict-ref d v (lambda () (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks)))))
+         (define (trace d s)
+           (let ((v (reference d s)))
+             (cond
+               ((not (cadr v)) (car v))
+               ((symbol? (cadr v)) (trace d (cadr v)))
+               (else s))))
+         (for/fold ((dict null))
+                   ((st (in-list statements)))
+           (define-syntax-rule (handle h p ...)
+             (let-values (((num res)
+                           (for/fold ((n 0) (r null))
+                                     ((v (in-list (list p ...))))
+                             (cond ((symbol? v)
+                                    (define l (trace dict v))
+                                    (if (fixnum? l)
+                                        (values (h n l) r)
+                                        (values (h n (car (reference dict v))) (cons l r))))
+                                   (else (values (h n v) r))))))
+               (list num
+                     (cond ((null? res) #f)
+                           ((and (null? (cdr res)) (eq? 'h '+)) (car res))
+                           (else (cons 'h (reverse res)))))))
+           (cons
+            (cons (if (tail? st) #f (cadr st))
+                  (match (if (tail? st) (cadr st) (caddr st))
+                    ((list '+ p1 p2) (handle + p1 p2))
+                    ((list '- p1 p2) (handle - p1 p2))
+                    ((list '- p) (handle - p))
+                    ((list 'read) (list 0 '(read)))
+                    (p (handle + p))))
+            dict)))))
+    (list 'program
+          (list 'start
+                (apply
+                 append
+                 (reverse
+                  (foldl
+                   (lambda (st re)
+                     (cons
+                      (match st
+                        ;;tail position
+                        ((list #f n a)
+                         (cond ((and (zero? n) a) (list (list 'return a)))
+                               ((not a) (list (list 'return n)))
+                               ((symbol? a) (list (list 'return (list '+ n a))))
+                               (else (define-values (former latter)
+                                       (split-at (cons (car a) (cons n (cdr a))) 3))
+                                     (if (null? latter)
+                                         (list (list 'return former))
+                                         (let ((nv (string->symbol (symbol->string (gensym 'ret)))))
+                                           (list (list 'define nv former)
+                                                 (list 'return (append (list (car a) nv) latter))))))))
+                        ;;assignment
+                        ((list var _ expr)
+                         (if (or (not expr) (symbol? expr)) null (list (list 'define var expr)))))
+                      re))
+                   null
+                   (reverse sequence)))))))
   (define (select-instructions form)
     (define (format-instruction template . args)
       (apply apply-generic 'format-instruction 'x86-instruction-template template args))
