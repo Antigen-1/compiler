@@ -271,12 +271,11 @@
 (define (install-X86raw)
   (install-x86-instruction-block)
 
-  (define block? (list/c symbol? (listof (get-contract 'x86-instruction))))
   (define form?
     (opt/c
      (cons/c
       'program
-      (and/c (listof block?)
+      (and/c (listof (get-contract 'x86-instruction-block))
              (lambda (ls)
                (match ls
                  ((list-no-order (list 'main _) (list 'start _) (list 'conclusion _)) #t)
