@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list racket/string racket/format (for-syntax racket/base racket/syntax))
+(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list racket/string (for-syntax racket/base))
 (provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
 
 (define (install-language name contract interpreter . passes)
@@ -102,7 +102,7 @@
 ;;Cvar
 ;;------------------------------------------------------------------------------------
 (define (install-Cvar)
-  (install-x86-instruction)
+  (install-x86-instruction-template)
   
   (define assign? (list/c 'define symbol? atomic?))
   (define tail? (list/c 'return atomic?))
@@ -269,7 +269,7 @@
 ;;X86raw
 ;;------------------------------------------------------------------------------------
 (define (install-X86raw)
-  (cond ((not (installed? 'x86-instruction)) (install-x86-instruction)))
+  (install-x86-instruction-block)
 
   (define block? (list/c symbol? (listof (get-contract 'x86-instruction))))
   (define form?
@@ -282,15 +282,10 @@
                  ((list-no-order (list 'main _) (list 'start _) (list 'conclusion _)) #t)
                  (_ #f)))))))
   
-  (define (instruction->string ins)
-    (apply-generic 'instruction->string 'x86-instruction ins))
+  (define (block->string b) (apply-generic 'block->string 'x86-instruction-block b))
   
   (define (make-text form)
-    (define (handle-block block) (string-append (~a (car block)) ":\n"
-                                                (string-join #:before-first " " (map instruction->string (cadr block)))))
-    (string-append* (cons
-                     ".global main\n"
-                     (map handle-block (cdr form)))))
+    (string-append* (cons (format ".global ~amain\n" (if (eq? (system-type 'os) 'macosx) "_" "")) (map block->string (cdr form)))))
   
   (apply install 'X86raw form? (pairify make-text)))
 ;;------------------------------------------------------------------------------------
