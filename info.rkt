@@ -1,5 +1,5 @@
 #lang info
-(define collection "compiler")
+(define collection "my-compiler")
 (define deps '("base"))
 (define build-deps '("scribble-lib" "racket-doc" "rackunit-lib"))
 (define scribblings '(("scribblings/compiler.scrbl" ())))

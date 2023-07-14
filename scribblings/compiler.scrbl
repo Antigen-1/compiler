@@ -1,10 +1,5 @@
 #lang scribble/manual
-@require[@for-label[compiler
-                    racket/base]]
+@require[@for-label[racket/base]]
 
-@title{compiler}
-@author{}
-
-@defmodule[compiler]
-
-Package Description Here
+@title{My Compiler}
+@author{Antigen-1}
