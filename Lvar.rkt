@@ -253,15 +253,19 @@
            (list
             (list
              'main
-             (list '(pushq %rbp)
-                   '(movq %rsp %rbp)
-                   (list 'subq stack-size '%rsp)
-                   (jump 'start)))
+             (if (zero? stack-size)
+                 (list (jump 'start))
+                 (list '(pushq %rbp)
+                       '(movq %rsp %rbp)
+                       (list 'subq stack-size '%rsp)
+                       (jump 'start))))
             (list
              'conclusion
-             (list (list 'addq stack-size '%rsp)
-                   '(popq %rbp)
-                   '(retq))))))))))
+             (if (zero? stack-size)
+                 (list '(retq))
+                 (list (list 'addq stack-size '%rsp)
+                       '(popq %rbp)
+                       '(retq)))))))))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
 ;;------------------------------------------------------------------------------------
