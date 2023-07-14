@@ -122,7 +122,7 @@
     ;;assoc: (list/c <var> <static> <dynamic>)
     ;;<var>: symbol?
     ;;<static>: fixnum?
-    ;;<dynamic>: (or/c #f (and/c (not/c fixnum?) atomic?))
+    ;;<dynamic>: (or/c #f <var> (list/c '+ <var> <var>) (list/c '- <var> <var>) (list/c '- <var>) (list/c 'read))
     (define sequence
       (match form
         ((list 'program (list 'start statements))
