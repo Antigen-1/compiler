@@ -237,10 +237,7 @@
                          (else (handle (cadr st) (caddr st) (cdr ac)))))
                  (cons (cons l (car ac)) t))
                (cons null (hasheq)) statements)))))))
-       (define stack-size
-         (let ((c (gen)))
-           (let-values (((q r) (quotient/remainder (abs (+ c 8)) 16)))
-             (if (zero? r) (* 16 q) (* 16 (add1 q))))))
+       (define stack-size (- (+ 8 (gen))))
        (list 'program (pairify stack-size) block))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
