@@ -42,7 +42,7 @@
        (list 'let (list (list nv (uniquify e table))) (uniquify f nt)))
       (exp (cond ((symbol? exp) (reference exp table))
                  ((fixnum? exp) exp)
-                 (else (list (car exp) (map (lambda (s) (uniquify s table)) (cdr exp))))))))
+                 (else (cons (car exp) (map (lambda (s) (uniquify s table)) (cdr exp))))))))
   #; (-> Lvar Lvar_mon)
   (define (remove-complex-operands form)
     (if (mon? form)
