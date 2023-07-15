@@ -237,7 +237,7 @@
                          (else (handle (cadr st) (caddr st) (cdr ac)))))
                  (cons (cons l (car ac)) t))
                (cons null (hasheq)) statements)))))))
-       (define stack-size (- (+ 8 (gen))))
+       (define stack-size (* 16 (ceiling (/ (- (+ 8 (gen))) 16))))
        (list 'program (pairify stack-size) block))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
