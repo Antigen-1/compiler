@@ -174,16 +174,11 @@
                          (cond ((not a) (list (list 'return n)))
                                ((zero? n) (list (list 'return a)))
                                ((symbol? a) (list (list 'return (list '+ n a))))
-                               (else (define-values (former latter)
-                                       (split-at (cons (car a) (cons n (cdr a))) 3))
-                                     ;;n '(- a) => '(- n a)
-                                     ;;n '(- a1 a2) => '(+ n a1) '(a2)
-                                     ;;n '(+ a1 a2) => '(+ n a1) '(a2)
-                                     (if (null? latter)
-                                         (list (list 'return former))
-                                         (let ((nv (string->symbol (symbol->string (gensym 'ret)))))
-                                           (list (list 'define nv (cons '+ (cdr former)))
-                                                 (list 'return (append (list (car a) nv) latter))))))))
+                               (((list/c '- symbol?) a) (list (list 'return (cons '- (cons n (cdr a))))))
+                               (else
+                                (define ns (string->symbol (symbol->string (gensym 'ret))))
+                                (list (list 'define ns a)
+                                      (list 'return (list '+ ns n))))))
                         ;;assignment
                         ((list var _ expr)
                          (if (or (not expr) (symbol? expr)) null (list (list 'define var expr)))))
@@ -192,7 +187,7 @@
                    (reverse sequence)))))))
   (define (select-instructions form)
     (define (format-instruction template . args)
-      (apply apply-generic 'format-instruction 'x86-instruction-template template args))
+      (apply apply-generic 'format-instruction (tag 'x86-instruction-template template) args))
     (define gen (generator () (let loop ((i -8))
                                 (yield i)
                                 (loop (- i 8)))))
@@ -304,7 +299,7 @@
                  ((list-no-order (list 'main _) (list 'start _) (list 'conclusion _)) #t)
                  (_ #f)))))))
   
-  (define (block->string b) (apply-generic 'block->string 'x86-instruction-block b))
+  (define (block->string b) (apply-generic 'block->string (tag 'x86-instruction-block b)))
   
   (define (make-text form)
     (string-append* (cons (format ".global ~amain\n" (if (eq? (system-type 'os) 'macosx) "_" "")) (map block->string (cdr form)))))
@@ -320,7 +315,7 @@
                  (lambda (l)
                    (lambda (i (f #t))
                      (foldl
-                      (lambda (p i) (if (or f (caddr p)) (apply-generic (cadr p) (car p) i) i))
+                      (lambda (p i) (if (or f (caddr p)) (apply-generic (cadr p) (tag (car p) i)) i))
                       i l)))))
   (install-Lvar)
   (install-Lvar_mon)
@@ -328,12 +323,14 @@
   (install-X86int)
   (install-X86raw)
   
-  (apply-generic 'make-Lvar-compiler 'Lvar-compiler
-                 (list (list 'Lvar 'uniquify #t)
-                       (list 'Lvar 'remove-complex-operands #t)
-                       (list 'Lvar_mon 'explicate-control #t)
-                       (list 'Cvar 'partial-evaluate #f)
-                       (list 'Cvar 'select-instructions #t)
-                       (list 'X86int 'assign-home #t)
-                       (list 'X86raw 'make-text #t))))
+  (apply-generic 'make-Lvar-compiler
+                 (tag
+                  'Lvar-compiler
+                  (list (list 'Lvar 'uniquify #t)
+                        (list 'Lvar 'remove-complex-operands #t)
+                        (list 'Lvar_mon 'explicate-control #t)
+                        (list 'Cvar 'partial-evaluate #f)
+                        (list 'Cvar 'select-instructions #t)
+                        (list 'X86int 'assign-home #t)
+                        (list 'X86raw 'make-text #t)))))
 ;;------------------------------------------------------------------------------------

@@ -1,8 +1,13 @@
 #lang racket/base
 (require racket/contract)
 (provide (contract-out #:unprotected-submodule unsafe
+                       #:exists tagged
                        (tag? (-> any/c boolean?))
                        (installed? (-> tag? boolean?))
+
+                       (tag (opt/c (->i ((name (and/c tag? installed?)) (content (name) (get-contract name))) (result tagged))))
+                       (tagged-object-tag (-> tagged any))
+                       (tagged-object-content (-> tagged any))
                        
                        (install (opt/c (->i ((name (and/c tag? (not/c installed?)))
                                              (input-contract contract?))
@@ -14,17 +19,19 @@
                                            any)))
                        (get-contract (-> (and/c tag? installed?) any))
 
-                       (apply-generic (opt/c (->i ((op (name) (and/c tag? (lambda (op) (retrieve name op))))
-                                                   (name (and/c tag? installed?))
-                                                   (obj (name) (get-contract name)))
+                       (apply-generic (opt/c (->i ((op tag?) (obj tagged))
                                                   #:rest (rest list?)
-                                                  #:pre (rest name op) (procedure-arity-includes? (retrieve name op) (add1 (length rest)))
+                                                  #:pre (rest obj op)
+                                                  (let ((r (retrieve (tagged-object-tag obj) op)))
+                                                    (and r (procedure-arity-includes? r (add1 (length rest)))))
                                                   any)))))
 
 (define table (make-hasheq))
 
 (define tag? (and/c symbol? symbol-interned?))
 (define (installed? name) (hash-has-key? table name))
+
+(struct tagged-object (tag content) #:constructor-name tag)
 
 (define (install name input-contract . pairs)
   (hash-set! table name (vector input-contract (make-hasheq pairs))))
@@ -36,7 +43,7 @@
   (hash-set! (vector-ref (hash-ref table name) 1)
              op proc))
 
-(define (apply-generic op name obj . args)
-  (apply (retrieve name op)
-         obj
+(define (apply-generic op obj . args)
+  (apply (retrieve (tagged-object-tag obj) op)
+         (tagged-object-content obj)
          args))
