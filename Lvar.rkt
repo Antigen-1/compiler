@@ -171,8 +171,8 @@
                       (match st
                         ;;tail position
                         ((list #f n a)
-                         (cond ((and (zero? n) a) (list (list 'return a)))
-                               ((not a) (list (list 'return n)))
+                         (cond ((not a) (list (list 'return n)))
+                               ((zero? n) (list (list 'return a)))
                                ((symbol? a) (list (list 'return (list '+ n a))))
                                (else (define-values (former latter)
                                        (split-at (cons (car a) (cons n (cdr a))) 3))
