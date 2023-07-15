@@ -185,6 +185,7 @@
                       re))
                    null
                    (reverse sequence)))))))
+  #; (-> Cvar X86int)
   (define (select-instructions form)
     (define (format-instruction template . args)
       (apply apply-generic 'format-instruction (tag 'x86-instruction-template template) args))
@@ -258,7 +259,8 @@
   (install-x86-instruction)
 
   (define form? (opt/c (list/c 'program (list/c (cons/c 'stack-size fixnum?)) (list/c 'start (listof (get-contract 'x86-instruction))))))
-  
+
+  #; (-> X86int X86raw)
   (define (assign-home form)
     (match form
       ((list 'program (list (cons 'stack-size stack-size)) block)
@@ -300,7 +302,8 @@
                  (_ #f)))))))
   
   (define (block->string b) (apply-generic 'block->string (tag 'x86-instruction-block b)))
-  
+
+  #; (-> X86raw string?)
   (define (make-text form)
     (string-append* (cons (format ".global ~amain\n" (if (eq? (system-type 'os) 'macosx) "_" "")) (map block->string (cdr form)))))
   
