@@ -224,21 +224,17 @@
           (let ((na (make-address (gen))))
             (values (hash-set table ret na) (append il (list (unstash na)))))
           (values table il)))
-
-    (define (jump l) (format-instruction '(jmp ~l) l))
     
     (match form
       ((list 'program (list 'start statements))
-       (cons
-        'program
-        (cons
+       (define block
          (list
           'start
           (apply
            append
            (reverse
             (cons
-             (list (jump 'conclusion))
+             (list '(jmp (~l conclusion)))
              (car
               (foldl
                (lambda (st ac)
@@ -246,28 +242,46 @@
                    (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
                          (else (handle (cadr st) (caddr st) (cdr ac)))))
                  (cons (cons l (car ac)) t))
-               (cons null (hasheq)) statements))))))
-         (let ((stack-size
-                (let-values (((q r) (quotient/remainder (abs (+ (gen) 8)) 16)))
-                  (* 16 (if (zero? r) q (add1 q))))))
-           (list
-            (list
-             'main
-             (if (zero? stack-size)
-                 (list (jump 'start))
-                 (list '(pushq %rbp)
-                       '(movq %rsp %rbp)
-                       (list 'subq stack-size '%rsp)
-                       (jump 'start))))
-            (list
-             'conclusion
-             (if (zero? stack-size)
-                 (list '(retq))
-                 (list (list 'addq stack-size '%rsp)
-                       '(popq %rbp)
-                       '(retq)))))))))))
+               (cons null (hasheq)) statements)))))))
+       (define stack-size
+         (let ((c (gen)))
+           (let-values (((q r) (quotient/remainder (abs (+ c 8)) 16)))
+             (if (zero? r) (* 16 q) (* 16 (add1 q))))))
+       (list 'program (pairify stack-size) block))))
   
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
+;;------------------------------------------------------------------------------------
+
+;;X86int
+;;------------------------------------------------------------------------------------
+(define (install-X86int)
+  (install-x86-instruction)
+
+  (define form? (opt/c (list/c 'program (list/c (cons/c 'stack-size fixnum?)) (list/c 'start (listof (get-contract 'x86-instruction))))))
+  
+  (define (assign-home form)
+    (match form
+      ((list 'program (list (cons 'stack-size stack-size)) block)
+       (list
+        'program
+        block
+        (list
+         'main
+         (if (zero? stack-size)
+             (list '(jmp (~l start)))
+             (list '(pushq %rbp)
+                   '(movq %rsp %rbp)
+                   (list 'subq stack-size '%rsp)
+                   '(jmp (~l start)))))
+        (list
+         'conclusion
+         (if (zero? stack-size)
+             (list '(retq))
+             (list (list 'addq stack-size '%rsp)
+                   '(popq %rbp)
+                   '(retq))))))))
+
+  (apply install 'X86int form? (pairify assign-home)))
 ;;------------------------------------------------------------------------------------
 
 ;;X86raw
@@ -299,13 +313,14 @@
   (install 'Lvar-compiler (listof (list/c (and/c tag? installed?) tag? boolean?))
            (cons 'make-Lvar-compiler
                  (lambda (l)
-                   (lambda (i f)
+                   (lambda (i (f #t))
                      (foldl
                       (lambda (p i) (if (or f (caddr p)) (apply-generic (cadr p) (car p) i) i))
                       i l)))))
   (install-Lvar)
   (install-Lvar_mon)
   (install-Cvar)
+  (install-X86int)
   (install-X86raw)
   
   (apply-generic 'make-Lvar-compiler 'Lvar-compiler
@@ -314,5 +329,6 @@
                        (list 'Lvar_mon 'explicate-control #t)
                        (list 'Cvar 'partial-evaluate #f)
                        (list 'Cvar 'select-instructions #t)
+                       (list 'X86int 'assign-home #t)
                        (list 'X86raw 'make-text #t))))
 ;;------------------------------------------------------------------------------------
