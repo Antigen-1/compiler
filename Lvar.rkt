@@ -287,7 +287,7 @@
 
   #; (-> X86raw string?)
   (define (make-text form)
-    (string-append* (cons (format ".global ~amain\n" (if (eq? (system-type 'os) 'macosx) "_" "")) (map block->string (cdr form)))))
+    (string-append* (cons (format ".global ~a\n" (resolve-label 'main)) (map block->string (cdr form)))))
   
   (apply install 'X86raw form? (pairify make-text)))
 ;;------------------------------------------------------------------------------------

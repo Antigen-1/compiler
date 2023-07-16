@@ -1,6 +1,6 @@
 #lang racket/base
 (require racket/contract racket/match racket/string racket/format "pkg.rkt")
-(provide install-x86-instruction-template install-x86-instruction install-x86-instruction-block)
+(provide install-x86-instruction-template install-x86-instruction install-x86-instruction-block resolve-label)
 
 (define register? (list/c '~r symbol?))
 (define address? (list/c '~a (cons/c fixnum? symbol?)))
