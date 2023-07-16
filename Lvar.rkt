@@ -57,7 +57,7 @@
                (let ((r (remove-complex-operands e)))
                  (cond ((primitive? r) (values (cons r s) d))
                        (else
-                        (define ns (n:gensym))
+                        (define ns (n:gensym 'tmp))
                         (values (cons ns s) (cons (cons ns r) d)))))))
            (foldl (lambda (pair base) (list 'let (list (list (car pair) (cdr pair))) base))
                   (cons op (reverse st)) dy)))))
