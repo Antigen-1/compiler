@@ -1,11 +1,14 @@
 #lang racket/base
-(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/list racket/string (for-syntax racket/base))
+(require racket/contract "pkg.rkt" "instruction.rkt" racket/match racket/generator racket/dict racket/string (for-syntax racket/base))
 (provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
 
 (define-syntax-rule (pairify id ...) (list (cons 'id id) ...))
+
+(define (n:gensym s)
+  (string->symbol (symbol->string (gensym s))))
 
 ;;Lvar
 ;;------------------------------------------------------------------------------------
@@ -26,9 +29,6 @@
   
   (define (Lvar-interpret form)
     (eval form (make-base-namespace)))
-
-  (define (n:gensym s)
-    (string->symbol (symbol->string (gensym s))))
   
   #; (-> Lvar |restricted Lvar|)
   (define (uniquify form (table (hasheq)))
@@ -107,12 +107,15 @@
        (eval (cons 'begin statements) ns))))
 
   #; (-> Cvar Cvar)
-  ;; An optional optimization
+  ;; This is an optional optimization.
+  ;; Only addition, negation and subtraction are covered.
   (define (partial-evaluate form)
-    ;;assoc: (list/c <var> <static> <dynamic>)
+    ;;assoc: (cons/c <var> <value>)
     ;;<var>: symbol?
+    ;;<value>: (list/c <static> <dynamic>)
     ;;<static>: fixnum?
-    ;;<dynamic>: (or/c #f <var> (list/c '+ <var> <var>) (list/c '- <var> <var>) (list/c '- <var>) (list/c 'read))
+    ;;<dynamic>: (or/c #f <var> (list/c '+ <var> <var>) (list/c '- <var> <var>) (list/c '- <var>) (list/c <operator> (listof <value>)))
+    ;;<operator>: symbol?
     (define sequence
       (match form
         ((list 'program (list 'start statements))
@@ -142,9 +145,32 @@
                     ((list '+ p1 p2) (handle + p1 p2))
                     ((list '- p1 p2) (handle - p1 p2))
                     ((list '- p) (handle - 0 p))
-                    ((list 'read) (list 0 '(read)))
+                    ;;for extensibility
+                    ((list op arg ...) (list 0 (list op (map (lambda (a) (handle + 0 a)) arg))))
                     (p (handle + 0 p))))
             dict)))))
+    (define (merge n a make-continuation else-proc)
+      (let/cc ret
+        (list
+         (make-continuation
+          (let loop ((n n) (a a))
+            (cond ((not a) n)
+                  ;;for extensibility
+                  ;;In this case, the last branch will never be reached during recursive calls to `loop`, and `n` will always be zero.
+                  (((list/c symbol? list?) a)
+                   (let-values (((f c)
+                                 (for/fold ((final null) (complex null))
+                                           ((a (in-list (cadr a))))
+                                   (define result (loop (car a) (cadr a)))
+                                   (cond ((primitive? result) (values (cons result final) complex))
+                                         (else
+                                          (define ns (n:gensym 'arg))
+                                          (values (cons ns final) (cons (list 'define ns result) complex)))))))
+                     (ret (reverse (cons (make-continuation (cons (car a) (reverse f))) c)))))
+                  ((zero? n) a)
+                  ((symbol? a) (list '+ n a))
+                  (((list/c '- symbol?) a) (cons '- (cons n (cdr a))))
+                  (else (else-proc n a ret make-continuation))))))))
     (list 'program
           (list 'start
                 (apply
@@ -156,17 +182,16 @@
                       (match st
                         ;;tail position
                         ((list #f n a)
-                         (cond ((not a) (list (list 'return n)))
-                               ((zero? n) (list (list 'return a)))
-                               ((symbol? a) (list (list 'return (list '+ n a))))
-                               (((list/c '- symbol?) a) (list (list 'return (cons '- (cons n (cdr a))))))
-                               (else
-                                (define ns (string->symbol (symbol->string (gensym 'ret))))
-                                (list (list 'define ns a)
-                                      (list 'return (list '+ ns n))))))
+                         (merge n a (lambda (e) (list 'return e))
+                                (lambda (n a ret make-continuation)
+                                  (define ns (n:gensym 'ret))
+                                  (ret (list (list 'define ns a)
+                                             (make-continuation (list '+ ns n)))))))
                         ;;assignment
                         ((list var _ expr)
-                         (if (or (not expr) (symbol? expr)) null (list (list 'define var expr)))))
+                         (cond ((or (not expr) (symbol? expr)) null)
+                               (((list/c symbol? list?) expr) (merge 0 expr (lambda (e) (list 'define var e)) void))
+                               (else (list (list 'define var expr))))))
                       re))
                    null
                    (reverse sequence)))))))
