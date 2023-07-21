@@ -1,5 +1,6 @@
 #lang racket/base
-(require racket/contract racket/match racket/generator racket/dict racket/string
+(require racket/contract racket/match racket/generator racket/dict racket/string racket/set racket/list
+         graph
          "pkg.rkt" "instruction.rkt"
          (for-syntax racket/base))
 (provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
@@ -93,6 +94,12 @@
 
 ;;Cvar
 ;;------------------------------------------------------------------------------------
+;;locations
+(struct register (name) #:transparent)
+(define caller-saved-registers (map register '(rax rcx rdx rsi rdi r8 r9 r10 r11)))
+(define callee-saved-registers (map register '(rsp rbp rbx r12 r13 r14 r15)))
+(define argument-passing-registers (map register '(rdi rsi rdx rcx r8 r9)))
+
 (define (install-Cvar)
   (install-x86-instruction-template)
   
@@ -198,6 +205,7 @@
                    null
                    (reverse sequence)))))))
   #; (-> Cvar X86int)
+  ;; without register allocation
   (define (select-instructions form)
     (define (format-instruction template . args)
       (apply apply-generic 'format-instruction (tag 'x86-instruction-template template) args))
@@ -258,8 +266,61 @@
                (cons null (hasheq)) statements)))))))
        (define stack-size (* 16 (ceiling (/ (- (+ 8 (gen))) 16))))
        (list 'program (pairify stack-size) block))))
+  #; (-> Cvar Cvar_conflicts)
+  ;; Including `uncover-live` pass and `build-interference` pass
+  ;; The `live` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
+  ;; The items in the set can be compound objects so that lists used as sets and hash sets built with `set` are recommended.
+  ;; Hash sets built with `mutable-set` are also allowed, but not preferred.
+  (define (find-conflicts form (live (set)))
+    (define (left-hand st)
+      (match st
+        ((list 'define var _) var)
+        ((list 'return _) (register 'rax))))
+    (define (right-hand st)
+      (match st
+        ((list 'define _ e) e)
+        ((list 'return e) e)))
+
+    (define (W st)
+      (define base (left-hand st))
+      (define registers
+        (let ((r (right-hand st)))
+          (if (or (primitive? r) (eq? (car r) '+) (eq? (car r) '-)) null caller-saved-registers)))
+      (list->set (cons base registers)))
+    (define (R st)
+      (define base (right-hand st))
+      (cond ((symbol? base) (set base))
+            ((primitive? base) (set))
+            (else
+             (define registers
+               (if (or (eq? (car base) '+) (eq? (car base) '-))
+                   null (take argument-passing-registers (min 6 (length (cdr base))))))
+             (list->set (append registers (filter symbol? (cdr base)))))))
+    
+    (define (uncover-live sts)
+      (reverse
+       (cdr
+        (for/fold ((ac (list live)))
+                  ((st (in-list (reverse sts))))
+          (define write-set (W st))
+          (define read-set (R st))
+          (cons (set-union (set-subtract (car ac) write-set) read-set) (cons (list (car ac) write-set read-set) (cdr ac)))))))
+
+    (define (build-interference ls)
+      (undirected-graph
+       (for/fold ((s null)) ((l (in-list ls)))
+         (match l
+           ((list live write read)
+            (for/fold ((s s)) ((wloc (in-set write)))
+              (for/fold ((s s)) ((lloc (in-set live)))
+                (cond ((equal? wloc lloc) s) (else (set-add s (list wloc lloc)))))))))))
+    
+    (match form
+      ((list 'program (list 'start statements))
+       (define conflicts (build-interference (uncover-live statements)))
+       (list 'program (pairify conflicts) (list 'start statements)))))
   
-  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions)))
+  (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions find-conflicts)))
 ;;------------------------------------------------------------------------------------
 
 ;;X86int
@@ -322,12 +383,12 @@
 ;;All
 ;;------------------------------------------------------------------------------------
 (define (install-All name)
-  (install 'compiler (listof (list/c (and/c tag? installed?) tag? boolean?))
+  (install 'compiler (listof (cons/c (and/c tag? installed?) (cons/c tag? (cons/c boolean? list?))))
            (cons 'make-compiler
                  (lambda (l)
                    (lambda (i (f #t))
                      (foldl
-                      (lambda (p i) (if (or f (caddr p)) (apply-generic (cadr p) (tag (car p) i)) i))
+                      (lambda (p i) (if (or f (caddr p)) (apply apply-generic (cadr p) (tag (car p) i) (cdddr p)) i))
                       i l)))))
   (define table
     (hasheq 'Lvar1
@@ -361,6 +422,7 @@
                                     (list 'Lvar 'remove-complex-operands #t)
                                     (list 'Lvar_mon 'explicate-control #t)
                                     (list 'Cvar 'partial-evaluate #f)
+                                    (list 'Cvar 'find-conflicts #t (set (register 'rsp) (register 'rax)))
                                     ))))))
   
   ((hash-ref table name)))
