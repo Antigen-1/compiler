@@ -129,15 +129,11 @@
       (match form
         ((list 'program (list 'start statements))
          (define (reference d v) (dict-ref d v (lambda () (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks)))))
-         (define (trace d s)
-           (if (fixnum? s)
-               (values s #f)
-               (let loop ((f #f) (s s))
-                 (define v (reference d s))
-                 (cond
-                   ((not (cadr v)) (values (car v) #f)) ;;this branch should always be reached when `loop` is first called due to infectivity
-                   ((symbol? (cadr v)) (if f (loop f (cadr v)) (values (car v) (loop #t (cadr v)))))
-                   (else (if f s (values (car v) s)))))))
+         (define (trace d p)
+           (if (fixnum? p)
+               (values p #f)
+               (let ((v (reference d p)))
+                 (values (car v) (if (or (not (cadr v)) (symbol? (cadr v))) (cadr v) p)))))
          (for/fold ((dict null))
                    ((st (in-list statements)))
            (define-syntax-rule (handle h p1 p2)
