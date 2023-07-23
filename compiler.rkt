@@ -333,7 +333,7 @@
   (define (allocate-registers form)
     (match form
       ((list 'program (list (cons 'conflicts graph)) (list 'start statements))
-       (define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int (register 'reg)) ...) (hash (~@ (register 'reg) int) ...)))
+       (define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int 'reg) ...) (hasheq (~@ 'reg int) ...)))
        (define-values (number->register register->number)
          (make-mapping
           (-5 r15) (-4 r11) (-3 rbp) (-2 rsp) (-1 rax)
@@ -360,7 +360,7 @@
        (define (count id)
          (define rs (filter (lambda (reg) (has-edge? graph reg id)) registers))
          (hash-set! saturation-table id (length rs))
-         (hash-set! exclusion-table id (list->seteq (map (lambda (reg) (hash-ref register->number reg)) rs))))
+         (hash-set! exclusion-table id (list->seteq (map (lambda (reg) (hash-ref register->number (register-name reg))) rs))))
 
        (define pqueue
          (make-pqueue
@@ -387,14 +387,14 @@
                   (loop (sub1 c))))))
 
        (define callee-saved-registers-in-use
-         (set->list (list->seteq (map (lambda (int) (register-name (hash-ref number->register int))) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
+         (set->list (list->seteq (map (lambda (int) (hash-ref number->register int)) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
        (define stack-size (let ((max (last (hash-values location-table #t))))
                             (if (> max 10) (* 8 (- max 10)) 0)))
 
        (define base (length callee-saved-registers-in-use))
        
        (define (number->location num)
-         (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) 'rbp)) (list '~r (register-name (hash-ref number->register num)))))
+         (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) 'rbp)) (list '~r (hash-ref number->register num))))
        (define (move s d) (list 'movq s d))
        (define (compute h . a) (cons h a))
        (define (make-token p)
