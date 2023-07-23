@@ -101,7 +101,8 @@
 
 ;;Cvar
 ;;------------------------------------------------------------------------------------
-;;locations
+;;registers
+;;They are all interned strings.
 (define caller-saved-registers '("rax" "rcx" "rdx" "rsi" "rdi" "r8" "r9" "r10" "r11"))
 (define callee-saved-registers '("rsp" "rbp" "rbx" "r12" "r13" "r14" "r15"))
 (define argument-passing-registers '("rdi" "rsi" "rdx" "rcx" "r8" "r9"))
@@ -337,6 +338,7 @@
   (define (allocate-registers form)
     (match form
       ((list 'program (list (cons 'conflicts graph)) (list 'start statements))
+       ;;All keys are interned.
        (define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int reg) ...) (hasheq (~@ reg int) ...)))
        (define-values (number->register register->number)
          (make-mapping
@@ -445,7 +447,7 @@
                                (and/c list? (lambda (l)
                                               (match l
                                                 ((list-no-order (cons 'stack-size f) (cons 'callee-saved-registers-in-use sl))
-                                                 (and (fixnum? f) ((listof string?) sl)))
+                                                 (and (fixnum? f) ((listof register?) sl)))
                                                 (_ #f))))
                                (list/c 'start (listof (get-contract 'x86-instruction))))))
 
@@ -481,13 +483,13 @@
          (append
           (list '(pushq "rbp"))
           (list '(movq "rsp" "rbp"))
-          (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'pushq (list '~r r))) callee-saved-registers-in-use))
+          (map (lambda (r) (list 'pushq r)) callee-saved-registers-in-use)
           (if (zero? offset) null (list (list 'subq offset "rsp")))
           (list '(jmp (~l start)))))
         (list
          'conclusion
          (append (if (zero? offset) null (list (list 'addq offset "rsp")))
-                 (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'popq (list '~r r))) (reverse callee-saved-registers-in-use)))
+                 (map (lambda (r) (list 'popq r)) (reverse callee-saved-registers-in-use))
                  (list '(popq "rbp"))
                  (list '(retq))))))))
 
