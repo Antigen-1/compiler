@@ -430,10 +430,12 @@
                   (move rax-location return-location)))))
               
        (list 'program (pairify stack-size callee-saved-registers-in-use)
-             (list 'start (apply append (map (lambda (st) (match st
-                                                            ((list 'define var expr) (handle (hash-ref location-table var) expr))
-                                                            ((list 'return expr) (handle -1 expr))))
-                                             statements)))))))
+             (list 'start
+                   (append (apply append (map (lambda (st) (match st
+                                                             ((list 'define var expr) (handle (hash-ref location-table var) expr))
+                                                             ((list 'return expr) (handle -1 expr))))
+                                              statements))
+                           (list (list 'jmp '(~l conclusion)))))))))
   
   (apply install 'Cvar_conflicts Cvar_conflicts? (pairify allocate-registers)))
 ;;------------------------------------------------------------------------------------
