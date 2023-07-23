@@ -219,7 +219,7 @@
       (define (reference v)
         (hash-ref table v (lambda () (raise (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks))))))
 
-      (define (make-address l) (cons l 'rbp))
+      (define (make-address l) (cons l "rbp"))
       
       (define (stash i) (format-instruction '(movq ~i "rax") i))
       (define (load l) (format-instruction '(movq ~a "rax") l))
