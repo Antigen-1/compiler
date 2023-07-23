@@ -340,12 +340,6 @@
           (0 rcx) (1 rdx) (2 rsi) (3 rdi) (4 r8) (5 r9) (6 r10) (7 rbx) (8 r12) (9 r13) (10 r14)))
        
        (define-values (registers identifiers) (partition register? (get-vertices graph)))
-       (define move-related-set (match statements ((list (list 'define var expr) ... (list 'return last-expr))
-                                                   (let-values (((_ set)
-                                                                 (for/fold ((es expr) (res (seteq)))
-                                                                           ((v (in-list var)))
-                                                                   (values (cdr es) (if (symbol? (car es)) (set-add res v) res)))))
-                                                     set))))
        
        (define saturation-table (make-hasheq))
        (define exclusion-table (make-hasheq))
