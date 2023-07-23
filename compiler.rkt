@@ -13,6 +13,13 @@
 (define (n:gensym s)
   (string->symbol (symbol->string (gensym s))))
 
+;;dependencies
+;;------------------------------------------------------------------------------------
+(install-x86-instruction-template)
+(install-x86-instruction)
+(install-x86-instruction-block)
+;;------------------------------------------------------------------------------------
+
 ;;Lvar
 ;;------------------------------------------------------------------------------------
 ;;common contracts
@@ -105,8 +112,6 @@
 (define tail? (list/c 'return atomic?))
 
 (define (install-Cvar)
-  (install-x86-instruction-template)
-  
   (define Cvar?
     (opt/c (list/c 'program (list/c 'start (*list/c assign? tail?)))))
 
@@ -437,8 +442,6 @@
 ;;X86int
 ;;------------------------------------------------------------------------------------
 (define (install-X86int)
-  (install-x86-instruction)
-
   (define form? (opt/c (list/c 'program (list/c (cons/c 'stack-size fixnum?) (cons/c 'callee-saved-registers-in-use (listof symbol?))) (list/c 'start (listof (get-contract 'x86-instruction))))))
 
   #; (-> X86int X86int)
@@ -490,8 +493,6 @@
 ;;X86raw
 ;;------------------------------------------------------------------------------------
 (define (install-X86raw)
-  (install-x86-instruction-block)
-
   (define form?
     (opt/c
      (cons/c
