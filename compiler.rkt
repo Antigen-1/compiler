@@ -484,7 +484,7 @@
         (list
          'conclusion
          (append (if (zero? offset) null (list (list 'addq offset '%rsp)))
-                 (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'pushq (list '~r r))) (reverse callee-saved-registers-in-use)))
+                 (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'popq (list '~r r))) (reverse callee-saved-registers-in-use)))
                  (list '(popq %rbp))
                  (list '(retq))))))))
 
