@@ -1,7 +1,7 @@
 #lang racket/base
 (require racket/contract racket/match racket/generator racket/dict racket/string racket/set racket/list
          graph
-         "pkg.rkt" "instruction.rkt"
+         "pkg.rkt" "instruction.rkt" "support/priority_queue.rkt"
          (for-syntax racket/base))
 (provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
 
@@ -100,11 +100,13 @@
 (define callee-saved-registers (map register '(rsp rbp rbx r12 r13 r14 r15)))
 (define argument-passing-registers (map register '(rdi rsi rdx rcx r8 r9)))
 
+;;common contracts
+(define assign? (list/c 'define symbol? atomic?))
+(define tail? (list/c 'return atomic?))
+
 (define (install-Cvar)
   (install-x86-instruction-template)
   
-  (define assign? (list/c 'define symbol? atomic?))
-  (define tail? (list/c 'return atomic?))
   (define Cvar?
     (opt/c (list/c 'program (list/c 'start (*list/c assign? tail?)))))
 
@@ -260,8 +262,9 @@
                          (else (handle (cadr st) (caddr st) (cdr ac)))))
                  (cons (cons l (car ac)) t))
                (cons null (hasheq)) statements)))))))
-       (define stack-size (* 16 (ceiling (/ (- (+ 8 (gen))) 16))))
-       (list 'program (pairify stack-size) block))))
+       (define stack-size (- (+ 8 (gen))))
+       (define callee-saved-registers-in-use null)
+       (list 'program (pairify stack-size callee-saved-registers-in-use) block))))
   #; (-> Cvar Cvar_conflicts)
   ;; Including `uncover-live` pass and `build-interference` pass
   ;; The `live` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
@@ -319,37 +322,173 @@
   (apply install-language 'Cvar Cvar? Cvar-interpret (pairify partial-evaluate select-instructions find-conflicts)))
 ;;------------------------------------------------------------------------------------
 
+;;Cvar_conflicts
+;;------------------------------------------------------------------------------------
+(define (install-Cvar_conflicts)
+  (define Cvar_conflicts?
+    (list/c 'program (list/c (cons/c 'conflicts graph?))
+            (list/c 'start (*list/c assign? tail?))))
+
+  #; (-> Cvar_conflicts X86int)
+  (define (allocate-registers form)
+    (match form
+      ((list 'program (list (cons 'conflicts graph)) (list 'start statements))
+       (define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int (register 'reg)) ...) (hash (~@ (register 'reg) int) ...)))
+       (define-values (number->register register->number)
+         (make-mapping
+          (-5 r15) (-4 r11) (-3 rbp) (-2 rsp) (-1 rax)
+          (0 rcx) (1 rdx) (2 rsi) (3 rdi) (4 r8) (5 r9) (6 r10) (7 rbx) (8 r12) (9 r13) (10 r14)))
+       
+       (define-values (registers identifiers) (partition register? (get-vertices graph)))
+       (define move-related-set (match statements ((list (list 'define var expr) ... (list 'return last-expr))
+                                                   (let-values (((_ set)
+                                                                 (for/fold ((es expr) (res (seteq)))
+                                                                           ((v (in-list var)))
+                                                                   (values (cdr es) (if (symbol? (car es)) (set-add res v) res)))))
+                                                     set))))
+       
+       (define saturation-table (make-hasheq))
+       (define exclusion-table (make-hasheq))
+       (define handles-mapping (make-hasheq))
+       (define location-table (make-hasheq))
+       
+       (define (variable-saturation id)
+         (hash-ref saturation-table id))
+       (define (update id num)
+         (hash-set! exclusion-table id (set-add (hash-ref exclusion-table id) num))
+         (hash-set! saturation-table id (set-count (hash-ref exclusion-table id))))
+       (define (count id)
+         (define rs (filter (lambda (reg) (has-edge? graph reg id)) registers))
+         (hash-set! saturation-table id (length rs))
+         (hash-set! exclusion-table id (list->seteq (map (lambda (reg) (hash-ref register->number reg)) rs))))
+
+       (define pqueue
+         (make-pqueue
+          (lambda (var1 var2)
+            (> (variable-saturation var1) (variable-saturation var2)))))
+       (map (lambda (id) (count id) (hash-set! handles-mapping id (pqueue-push! pqueue id))) identifiers)
+       
+       (define (color var)
+         (define exclusion (hash-ref exclusion-table var))
+         (define num
+           (let/cc ret
+             (for ((n (in-naturals)))
+               (cond ((not (set-member? exclusion n)) (ret n))))))
+         (for ((n (in-neighbors graph var)))
+           (cond ((not (register? n))
+                  (update n num)
+                  (pqueue-decrease-key! pqueue (hash-ref handles-mapping n)))))
+         num)
+
+       (let loop ((c (pqueue-count pqueue)))
+         (cond ((not (zero? c))
+                (let* ((v (pqueue-pop! pqueue)))
+                  (hash-set! location-table v (color v))
+                  (loop (sub1 c))))))
+
+       (define callee-saved-registers-in-use
+         (set->list (list->seteq (map (lambda (int) (register-name (hash-ref number->register int))) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
+       (define stack-size (let ((max (last (hash-values location-table #t))))
+                            (if (> max 10) (* 8 (- max 10)) 0)))
+
+       (define base (length callee-saved-registers-in-use))
+       
+       (define (number->location num)
+         (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) 'rbp)) (list '~r (register-name (hash-ref number->register num)))))
+       (define (move s d) (list 'movq s d))
+       (define (compute h . a) (cons h a))
+       (define (make-token p)
+         (if (symbol? p)
+             (number->location (hash-ref location-table p))
+             p))
+       
+       (define rax-location (number->location -1))
+
+       (define (handle ret expr)
+         (define return-location (number->location ret))
+         (match expr
+           ((list '+ arg1 arg2)
+            #:when (and (symbol? arg2) (= (hash-ref location-table arg2) ret))
+            (list (compute 'addq (make-token arg1) return-location)))
+           ((list '- arg1 arg2)
+            #:when (and (symbol? arg2) (= (hash-ref location-table arg2) ret))
+            (list
+             (move (make-token arg2) rax-location)
+             (move (make-token arg1) return-location)
+             (compute 'subq rax-location return-location)))
+           ((list op arg1 arg2)
+            (let ((ins (if (eq? op '+) 'addq 'subq)))
+              (append
+               (if (= (hash-ref location-table arg1) ret) null (list (move (make-token arg1) return-location)))
+               (list (compute ins (make-token arg2) return-location)))))
+           ((list '- arg)
+            (append
+               (if (= (hash-ref location-table arg) ret) null (list (move (make-token arg) return-location)))
+               (list (compute 'negq return-location))))
+           ((list 'read)
+            (list (compute 'callq 'read_int)
+                  (move rax-location return-location)))))
+              
+       (list 'program (pairify stack-size callee-saved-registers-in-use)
+             (list 'start (apply append (map (lambda (st) (match st
+                                                            ((list 'define var expr) (handle (hash-ref location-table var) expr))
+                                                            ((list 'return expr) (handle -1 expr))))
+                                             statements)))))))
+  
+  (apply install 'Cvar_conflicts Cvar_conflicts? (pairify allocate-registers)))
+;;------------------------------------------------------------------------------------
+
 ;;X86int
 ;;------------------------------------------------------------------------------------
 (define (install-X86int)
   (install-x86-instruction)
 
-  (define form? (opt/c (list/c 'program (list/c (cons/c 'stack-size fixnum?)) (list/c 'start (listof (get-contract 'x86-instruction))))))
+  (define form? (opt/c (list/c 'program (list/c (cons/c 'stack-size fixnum?) (cons/c 'callee-saved-registers-in-use (listof symbol?))) (list/c 'start (listof (get-contract 'x86-instruction))))))
+
+  #; (-> X86int X86int)
+  (define (patch-instructions form)
+    (match form
+      ((list 'program dict (list 'start statements))
+       (define address? (or/c (list/c '~a any/c) (cons/c fixnum? symbol?)))
+       (list 'program
+             dict
+             (list 'start
+                   (apply append
+                          (map (lambda (st)
+                                 (match st
+                                   ((list op arg1 arg2)
+                                    (if (and (address? arg1) (address? arg2))
+                                        (list (list 'movq arg1 '%rax)
+                                              (list op '%rax arg2))
+                                        (list st)))
+                                   (_ (list st))))
+                               statements)))))))
 
   #; (-> X86int X86raw)
   (define (assign-home form)
     (match form
-      ((list 'program (list (cons 'stack-size stack-size)) block)
+      ((list 'program (list-no-order (cons 'stack-size stack-size) (cons 'callee-saved-registers-in-use callee-saved-registers-in-use)) block)
+       (define save-space (* 8 (length callee-saved-registers-in-use)))
+       (define offset (- (* 16 (ceiling (/ (+ save-space stack-size) 16))) save-space))
        (list
         'program
         block
         (list
          'main
-         (if (zero? stack-size)
-             (list '(jmp (~l start)))
-             (list '(pushq %rbp)
-                   '(movq %rsp %rbp)
-                   (list 'subq stack-size '%rsp)
-                   '(jmp (~l start)))))
+         (append
+          (list '(pushq %rbp))
+          (list '(movq %rsp %rbp))
+          (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'pushq (list '~r r))) callee-saved-registers-in-use))
+          (if (zero? offset) null (list (list 'subq offset '%rsp)))
+          (list '(jmp (~l start)))))
         (list
          'conclusion
-         (if (zero? stack-size)
-             (list '(retq))
-             (list (list 'addq stack-size '%rsp)
-                   '(popq %rbp)
-                   '(retq))))))))
+         (append (if (zero? offset) null (list (list 'addq offset '%rsp)))
+                 (if (null? callee-saved-registers-in-use) null (map (lambda (r) (list 'pushq (list '~r r))) (reverse callee-saved-registers-in-use)))
+                 (list '(popq %rbp))
+                 (list '(retq))))))))
 
-  (apply install 'X86int form? (pairify assign-home)))
+  (apply install 'X86int form? (pairify assign-home patch-instructions)))
 ;;------------------------------------------------------------------------------------
 
 ;;X86raw
@@ -410,6 +549,9 @@
               (install-Lvar)
               (install-Lvar_mon)
               (install-Cvar)
+              (install-Cvar_conflicts)
+              (install-X86int)
+              (install-X86raw)
 
               (apply-generic 'make-compiler
                              (tag
@@ -419,7 +561,10 @@
                                     (list 'Lvar_mon 'explicate-control #t)
                                     (list 'Cvar 'partial-evaluate #f)
                                     (list 'Cvar 'find-conflicts #t (set (register 'rsp) (register 'rax)))
-                                    ))))))
+                                    (list 'Cvar_conflicts 'allocate-registers #t)
+                                    (list 'X86int 'patch-instructions #t)
+                                    (list 'X86int 'assign-home #t)
+                                    (list 'X86raw 'make-text #t)))))))
   
   ((hash-ref table name)))
 ;;------------------------------------------------------------------------------------
