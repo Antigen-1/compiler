@@ -1,16 +1,18 @@
 #lang racket/base
 (require racket/contract racket/match racket/string racket/format "pkg.rkt")
-(provide install-x86-instruction-template install-x86-instruction install-x86-instruction-block resolve-label)
+(provide install-x86-instruction-template install-x86-instruction install-x86-instruction-block
+         resolve-label
+         register? address? immediate? label? command? argument?)
 
-(define register? (list/c '~r symbol?))
-(define address? (list/c '~a (cons/c fixnum? symbol?)))
-(define integer? (list/c '~i fixnum?))
-(define label? (list/c '~l symbol?))
-(define command? (list/c '~c symbol?))
-(define argument? (or/c register? address? integer? label?))
-(define instruction? (cons/c (or/c command? symbol?) (listof (or/c argument? (cons/c fixnum? symbol?) symbol? fixnum?))))
+(define register? (or/c string? (list/c '~r string?)))
+(define address? (or/c (cons/c fixnum? string?) (list/c '~a (cons/c fixnum? string?))))
+(define immediate? (or/c fixnum? (list/c '~i fixnum?)))
+(define label? (or/c symbol? (list/c '~l symbol?)))
+(define command? (or/c symbol? (list/c '~c symbol?)))
+(define argument? (or/c register? address? immediate? label?))
+(define instruction? (cons/c command? (listof argument?)))
 (define block? (list/c symbol? (listof instruction?)))
-(define template? (cons/c (or/c '~c symbol?) (listof (or/c '~l '~r '~a '~i (cons/c fixnum? symbol?) symbol? fixnum?))))
+(define template? (cons/c (or/c '~c symbol?) (listof (or/c '~l '~r '~a '~i (cons/c fixnum? string?) string? symbol? fixnum?))))
 
 (define (resolve-label s) (if (eq? (system-type 'os) 'macosx) (string-append "_" (symbol->string s)) (symbol->string s)))
 
@@ -36,7 +38,9 @@
         ((list '~l s) (resolve-label s))
         ((list '~c s) (~a s))
         ((cons f r) (format "~a(%~a)" f r))
-        (v (if (symbol? v) (~a v) (format "$~a" v)))))
+        (v (cond ((symbol? v) (~a v))
+                 ((fixnum? v) (format "$~a" v))
+                 (else (format "%~a" v))))))
     ins)))
 (define (block->string block)
   (string-append (resolve-label (car block)) ":\n"
