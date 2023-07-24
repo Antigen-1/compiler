@@ -31,11 +31,11 @@
       ((list op arg1 arg2)
        (let ((ins (if (eq? op '+) 'addq 'subq)))
          (append
-          (if (= (variable->number arg1) num) null (list (move (make-token arg1) return-location)))
+          (if (and (symbol? arg1) (= (variable->number arg1) num)) null (list (move (make-token arg1) return-location)))
           (list (compute ins (make-token arg2) return-location)))))
       ((list '- arg)
        (append
-        (if (= (variable->number arg) num) null (list (move (make-token arg) return-location)))
+        (if (and (symbol? arg) (= (variable->number arg) num)) null (list (move (make-token arg) return-location)))
         (list (compute 'negq return-location))))
       ((list 'read)
        (list (compute 'callq 'read_int)
