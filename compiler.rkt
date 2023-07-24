@@ -13,13 +13,6 @@
 (define (n:gensym s)
   (string->symbol (symbol->string (gensym s))))
 
-;;dependencies
-;;------------------------------------------------------------------------------------
-(install-x86-instruction-template)
-(install-x86-instruction)
-(install-x86-instruction-block)
-;;------------------------------------------------------------------------------------
-
 ;;Lvar
 ;;------------------------------------------------------------------------------------
 ;;common contracts
@@ -401,8 +394,6 @@
          (if (symbol? p)
              (number->location (hash-ref location-table p))
              p))
-       
-       (define rax-location (number->location -1))
 
        (define (handle ret expr)
          (define return-location (number->location ret))
@@ -413,9 +404,9 @@
            ((list '- arg1 arg2)
             #:when (and (symbol? arg2) (= (hash-ref location-table arg2) ret))
             (list
-             (move (make-token arg2) rax-location)
+             (move (make-token arg2) "rax")
              (move (make-token arg1) return-location)
-             (compute 'subq rax-location return-location)))
+             (compute 'subq "rax" return-location)))
            ((list op arg1 arg2)
             (let ((ins (if (eq? op '+) 'addq 'subq)))
               (append
@@ -427,7 +418,7 @@
                (list (compute 'negq return-location))))
            ((list 'read)
             (list (compute 'callq 'read_int)
-                  (move rax-location return-location)))))
+                  (move "rax" return-location)))))
               
        (list 'program (pairify stack-size callee-saved-registers-in-use)
              (list 'start

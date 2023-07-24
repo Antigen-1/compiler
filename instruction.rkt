@@ -1,7 +1,6 @@
 #lang racket/base
 (require racket/contract racket/match racket/string racket/format "pkg.rkt")
-(provide install-x86-instruction-template install-x86-instruction install-x86-instruction-block
-         resolve-label
+(provide resolve-label
          register? address? immediate? label? command? argument?)
 
 (define register? (or/c string? (list/c '~r string?)))
@@ -46,9 +45,7 @@
   (string-append (resolve-label (car block)) ":\n"
                  (string-join (map instruction->string (cadr block)) #:before-first " ")))
 
-(define (install-x86-instruction-template)
-  (install 'x86-instruction-template template? (cons 'format-instruction format-instruction)))
-(define (install-x86-instruction)
-  (install 'x86-instruction instruction? (cons 'instruction->string instruction->string)))
-(define (install-x86-instruction-block)
-  (install 'x86-instruction-block block? (cons 'block->string block->string)))
+;; These packages are installed when this module is instantiated.
+(install 'x86-instruction-template template? (cons 'format-instruction format-instruction))
+(install 'x86-instruction instruction? (cons 'instruction->string instruction->string))
+(install 'x86-instruction-block block? (cons 'block->string block->string))
