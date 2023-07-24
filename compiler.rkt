@@ -341,8 +341,11 @@
 
        (define callee-saved-registers-in-use
          (set->list (list->seteq (map (lambda (int) (hash-ref number->register int)) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
-       (define stack-size (let ((max (argmax values (hash-values location-table))))
-                            (if (> max 10) (* 8 (- max 10)) 0)))
+       (define stack-size
+         (let ((vals (hash-values location-table)))
+           (if (null? vals) 0
+               (let ((m (argmax values vals)))
+                 (if (> m 10) (* 8 (- m 10)) 0)))))
 
        (define base (length callee-saved-registers-in-use))
        
