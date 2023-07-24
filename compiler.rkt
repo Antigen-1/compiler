@@ -469,6 +469,7 @@
                                     (list 'Lvar_mon 'explicate-control #t)
                                     (list 'Cvar 'partial-evaluate #f)
                                     (list 'Cvar 'select-instructions #t)
+                                    (list 'X86int 'patch-instructions #t)
                                     (list 'X86int 'assign-home #t)
                                     (list 'X86raw 'make-text #t)))))
             'Lvar2

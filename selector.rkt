@@ -10,11 +10,12 @@
   (define primitive? (or/c symbol? fixnum?))
   
   (define/contract (handle ret expr)
-    (-> (or/c symbol? exact-integer?) (or/c (list/c '+ primitive? primitive?)
+    (-> (or/c symbol? exact-integer?) (or/c primitive?
+                                            (list/c '+ primitive? primitive?)
                                             (list/c '- primitive?)
                                             (list/c '- primitive? primitive?)
                                             (list/c 'read))
-        (listof (get-contract 'x86-instruction)))
+        any)
     (define num (if (exact-integer? ret) ret (variable->number ret)))
     (define return-location (number->location num))
     (match expr
@@ -38,7 +39,10 @@
         (list (compute 'negq return-location))))
       ((list 'read)
        (list (compute 'callq 'read_int)
-             (move "rax" return-location)))))
+             (move "rax" return-location)))
+      (v (if (and (symbol? v) (= (variable->number v) num))
+             null
+             (list (move (make-token v) return-location))))))
 
   handle)
 
