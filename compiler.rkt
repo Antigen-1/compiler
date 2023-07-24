@@ -222,8 +222,7 @@
                      (append
                       (apply append
                              (map (lambda (v e) (handle v e)) var expr))
-                      (handle 0 last-expr)
-                      (list '(jmp (~l conclusion))))))))))
+                      (handle 0 last-expr))))))))
   #; (-> Cvar Cvar_conflicts)
   ;; Including `uncover-live` pass and `build-interference` pass
   ;; The `live` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
@@ -356,11 +355,10 @@
                      
        (list 'program (pairify stack-size callee-saved-registers-in-use)
              (list 'start
-                   (append (apply append (map (lambda (st) (match st
-                                                             ((list 'define var expr) (handle var expr))
-                                                             ((list 'return expr) (handle -1 expr))))
-                                              statements))
-                           (list '(jmp (~l conclusion)))))))))
+                   (apply append (map (lambda (st) (match st
+                                                     ((list 'define var expr) (handle var expr))
+                                                     ((list 'return expr) (handle -1 expr))))
+                                      statements)))))))
   
   (apply install 'Cvar_conflicts Cvar_conflicts? (pairify allocate-registers)))
 ;;------------------------------------------------------------------------------------
@@ -397,12 +395,13 @@
   #; (-> X86int X86raw)
   (define (assign-home form)
     (match form
-      ((list 'program (list-no-order (cons 'stack-size stack-size) (cons 'callee-saved-registers-in-use callee-saved-registers-in-use)) block)
+      ((list 'program (list-no-order (cons 'stack-size stack-size) (cons 'callee-saved-registers-in-use callee-saved-registers-in-use))
+             (list 'start statements))
        (define save-space (* 8 (length callee-saved-registers-in-use)))
        (define offset (- (* 16 (ceiling (/ (+ save-space stack-size) 16))) save-space))
        (list
         'program
-        block
+        (list 'start (append statements (list '(jmp (~l conclusion)))))
         (list
          'main
          (append
