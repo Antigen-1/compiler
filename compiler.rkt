@@ -1,7 +1,7 @@
 #lang racket/base
-(require racket/contract racket/match racket/generator racket/dict racket/string racket/set racket/list
+(require racket/contract racket/match racket/dict racket/string racket/set racket/list
          graph
-         "pkg.rkt" "instruction.rkt" "support/priority_queue.rkt"
+         "pkg.rkt" "selector.rkt" "instruction.rkt" "support/priority_queue.rkt"
          (for-syntax racket/base))
 (provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
 
@@ -203,66 +203,27 @@
   #; (-> Cvar X86int)
   ;; without register allocation
   (define (select-instructions form)
-    (define (format-instruction template . args)
-      (apply apply-generic 'format-instruction (tag 'x86-instruction-template template) args))
-    (define gen (generator () (let loop ((i -8))
-                                (yield i)
-                                (loop (- i 8)))))
-    (define (handle ret expr table)
-      (define (reference v)
-        (hash-ref table v (lambda () (raise (make-exn:fail:contract:variable v "not yet defined" (current-continuation-marks))))))
-
-      (define (make-address l) (cons l "rbp"))
-      
-      (define (stash i) (format-instruction '(movq ~i "rax") i))
-      (define (load l) (format-instruction '(movq ~a "rax") l))
-      (define (load-and-handle h l) (format-instruction '(~c ~a "rax") h l))
-      (define (handle-immediate-data h i) (format-instruction '(~c ~i "rax") h i))
-      (define (unstash l) (format-instruction '(movq "rax" ~a) l))
-
-      (define il
-        (match expr
-          ((list op p1 p2)
-           (let ((ins (if (eq? op '+) 'addq 'subq)))
-             (list (if (symbol? p1) (load (reference p1)) (stash p1))
-                   ((if (symbol? p2) load-and-handle handle-immediate-data)
-                    ins (if (symbol? p2) (reference p2) p2)))))
-          ((list '- p)
-           (list
-            (if (symbol? p)
-                (load (reference p))
-                (stash p))
-            (list 'negq "rax")))
-          ((list 'read)
-           (list (list 'callq 'read_int)))
-          (v (if (symbol? v) (list (load (reference v))) (list (stash v))))))
-      
-      (if ret
-          (let ((na (make-address (gen))))
-            (values (hash-set table ret na) (append il (list (unstash na)))))
-          (values table il)))
-    
     (match form
-      ((list 'program (list 'start statements))
-       (define block
-         (list
-          'start
-          (apply
-           append
-           (reverse
-            (cons
-             (list '(jmp (~l conclusion)))
-             (car
-              (foldl
-               (lambda (st ac)
-                 (define-values (t l)
-                   (cond ((tail? st) (handle #f (cadr st) (cdr ac)))
-                         (else (handle (cadr st) (caddr st) (cdr ac)))))
-                 (cons (cons l (car ac)) t))
-               (cons null (hasheq)) statements)))))))
-       (define stack-size (- (+ 8 (gen))))
-       (define callee-saved-registers-in-use null)
-       (list 'program (pairify stack-size callee-saved-registers-in-use) block))))
+      ((list 'program (list 'start (list (list 'define var expr) ... (list 'return last-expr))))
+       (let* ((location-table
+               (make-hasheq
+                (for/list ((v (in-list var))
+                           (n (in-naturals 1)))
+                  (cons v n))))
+              (stack-size (* 8 (hash-count location-table)))
+              (callee-saved-registers-in-use null)
+              (number->location (lambda (n) (if (zero? n) "rax" (cons (* -8 n) "rbp"))))
+              (variable->number
+               (lambda (v) (hash-ref location-table v (lambda () (raise (make-exn:fail:contract:variable v "There is no location allocated for this variable" (current-continuation-marks)))))))
+              (handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number)))))
+         (list 'program
+               (pairify stack-size callee-saved-registers-in-use)
+               (list 'start
+                     (append
+                      (apply append
+                             (map (lambda (v e) (handle v e)) var expr))
+                      (handle 0 last-expr)
+                      (list '(jmp (~l conclusion))))))))))
   #; (-> Cvar Cvar_conflicts)
   ;; Including `uncover-live` pass and `build-interference` pass
   ;; The `live` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
@@ -381,52 +342,25 @@
 
        (define callee-saved-registers-in-use
          (set->list (list->seteq (map (lambda (int) (hash-ref number->register int)) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
-       (define stack-size (let ((max (last (hash-values location-table #t))))
+       (define stack-size (let ((max (argmax values (hash-values location-table))))
                             (if (> max 10) (* 8 (- max 10)) 0)))
 
        (define base (length callee-saved-registers-in-use))
        
        (define (number->location num)
          (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) "rbp")) (list '~r (hash-ref number->register num))))
-       (define (move s d) (list 'movq s d))
-       (define (compute h . a) (cons h a))
-       (define (make-token p)
-         (if (symbol? p)
-             (number->location (hash-ref location-table p))
-             p))
-
-       (define (handle ret expr)
-         (define return-location (number->location ret))
-         (match expr
-           ((list '+ arg1 arg2)
-            #:when (and (symbol? arg2) (= (hash-ref location-table arg2) ret))
-            (list (compute 'addq (make-token arg1) return-location)))
-           ((list '- arg1 arg2)
-            #:when (and (symbol? arg2) (= (hash-ref location-table arg2) ret))
-            (list
-             (move (make-token arg2) "rax")
-             (move (make-token arg1) return-location)
-             (compute 'subq "rax" return-location)))
-           ((list op arg1 arg2)
-            (let ((ins (if (eq? op '+) 'addq 'subq)))
-              (append
-               (if (= (hash-ref location-table arg1) ret) null (list (move (make-token arg1) return-location)))
-               (list (compute ins (make-token arg2) return-location)))))
-           ((list '- arg)
-            (append
-               (if (= (hash-ref location-table arg) ret) null (list (move (make-token arg) return-location)))
-               (list (compute 'negq return-location))))
-           ((list 'read)
-            (list (compute 'callq 'read_int)
-                  (move "rax" return-location)))))
-              
+       (define (variable->number var)
+         (hash-ref location-table var (lambda () (raise (make-exn:fail:contract:variable var "There is no location allocated for this variable" (current-continuation-marks))))))
+       
+       (define handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number))))
+                     
        (list 'program (pairify stack-size callee-saved-registers-in-use)
              (list 'start
                    (append (apply append (map (lambda (st) (match st
-                                                             ((list 'define var expr) (handle (hash-ref location-table var) expr))
+                                                             ((list 'define var expr) (handle var expr))
                                                              ((list 'return expr) (handle -1 expr))))
                                               statements))
-                           (list (list 'jmp '(~l conclusion)))))))))
+                           (list '(jmp (~l conclusion)))))))))
   
   (apply install 'Cvar_conflicts Cvar_conflicts? (pairify allocate-registers)))
 ;;------------------------------------------------------------------------------------
