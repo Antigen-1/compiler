@@ -308,12 +308,14 @@
        (define (variable-saturation id)
          (hash-ref saturation-table id))
        (define (update id num)
-         (hash-set! exclusion-table id (set-add (hash-ref exclusion-table id) num))
-         (hash-set! saturation-table id (set-count (hash-ref exclusion-table id))))
+         (define new-set (set-add (hash-ref exclusion-table id) num))
+         (hash-set! exclusion-table id new-set)
+         (hash-set! saturation-table id (set-count new-set)))
        (define (count id)
          (define rs (filter (lambda (reg) (has-edge? graph reg id)) registers))
-         (hash-set! saturation-table id (length rs))
-         (hash-set! exclusion-table id (list->seteq (map (lambda (reg) (hash-ref register->number reg)) rs))))
+         (define new-set (list->seteq (map (lambda (reg) (hash-ref register->number reg)) rs)))
+         (hash-set! saturation-table id (set-count new-set))
+         (hash-set! exclusion-table id new-set))
 
        (define pqueue
          (make-pqueue
