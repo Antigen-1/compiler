@@ -404,22 +404,25 @@
              (list 'start statements))
        (define save-space (* 8 (length callee-saved-registers-in-use)))
        (define offset (- (* 16 (ceiling (/ (+ save-space stack-size) 16))) save-space))
+       (define align? (not (zero? offset)))
        (list
         'program
         (list 'start (append statements (list '(jmp (~l conclusion)))))
         (list
          'main
          (append
-          (list '(pushq "rbp"))
-          (list '(movq "rsp" "rbp"))
+          (if align?
+              '((pushq "rbp")
+                (movq "rsp" "rbp"))
+              null)
           (map (lambda (r) (list 'pushq r)) callee-saved-registers-in-use)
-          (if (zero? offset) null (list (list 'subq offset "rsp")))
+          (if align? (list (list 'subq offset "rsp")) null)
           (list '(jmp (~l start)))))
         (list
          'conclusion
-         (append (if (zero? offset) null (list (list 'addq offset "rsp")))
+         (append (if align? (list (list 'addq offset "rsp")) null)
                  (map (lambda (r) (list 'popq r)) (reverse callee-saved-registers-in-use))
-                 (list '(popq "rbp"))
+                 (if align? '((popq "rbp")) null)
                  (list '(retq))))))))
 
   (apply install 'X86int form? (pairify assign-home patch-instructions)))
