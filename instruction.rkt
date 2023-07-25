@@ -1,5 +1,5 @@
 #lang racket/base
-(require racket/contract racket/match racket/string racket/format "pkg.rkt")
+(require racket/contract racket/match racket/string "pkg.rkt")
 (provide resolve-label
          register? address? immediate? label? command? argument?)
 
@@ -28,19 +28,22 @@
   (define (string-list-join sl)
     (string-append (car sl) (string-join (cdr sl) "," #:before-first " ") "\n"))
   (string-list-join
-   (map
-    (lambda (i)
-      (match i
-        ((list '~r s) (format "%~a" s))
-        ((list '~a (cons f r)) (format "~a(%~a)" f r))
-        ((list '~i f) (format "$~a" f))
-        ((list '~l s) (resolve-label s))
-        ((list '~c s) (~a s))
-        ((cons f r) (format "~a(%~a)" f r))
-        (v (cond ((symbol? v) (~a v))
-                 ((fixnum? v) (format "$~a" v))
-                 (else (format "%~a" v))))))
-    ins)))
+   (cons
+    (match (car ins)
+      ((list '~c s) (symbol->string s))
+      (s (symbol->string s)))
+    (map
+     (lambda (i)
+       (match i
+         ((list '~r s) (format "%~a" s))
+         ((list '~a (cons f r)) (format "~a(%~a)" f r))
+         ((list '~i f) (format "$~a" f))
+         ((list '~l s) (resolve-label s))
+         ((cons f r) (format "~a(%~a)" f r))
+         (v (cond ((symbol? v) (resolve-label v))
+                  ((fixnum? v) (format "$~a" v))
+                  (else (format "%~a" v))))))
+     (cdr ins)))))
 (define (block->string block)
   (string-append (resolve-label (car block)) ":\n"
                  (string-join (map instruction->string (cadr block)) #:before-first " ")))
