@@ -215,7 +215,7 @@
               (number->location (lambda (n) (if (zero? n) "rax" (cons (* -8 n) "rbp"))))
               (variable->number
                (lambda (v) (hash-ref location-table v (lambda () (raise (make-exn:fail:contract:variable v "There is no location allocated for this variable" (current-continuation-marks)))))))
-              (handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number)))))
+              (handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number 0)))))
          (list 'program
                (pairify stack-size callee-saved-registers-in-use)
                (list 'start
@@ -356,7 +356,7 @@
        (define (variable->number var)
          (hash-ref location-table var (lambda () (raise (make-exn:fail:contract:variable var "There is no location allocated for this variable" (current-continuation-marks))))))
        
-       (define handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number))))
+       (define handle (apply-generic 'make-instruction-selector (tag 'selector (list number->location variable->number -1))))
                      
        (list 'program (pairify stack-size callee-saved-registers-in-use)
              (list 'start

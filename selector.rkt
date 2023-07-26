@@ -1,7 +1,7 @@
 #lang racket/base
 (require "pkg.rkt" "instruction.rkt" racket/match racket/contract)
 
-(define (make-instruction-selector number->location variable->number)
+(define (make-instruction-selector number->location variable->number rax-number)
   (define (move s d) (list 'movq s d))
   (define (compute h . a) (cons h a))
   (define (make-token p)
@@ -38,8 +38,8 @@
         (if (and (symbol? arg) (= (variable->number arg) num)) null (list (move (make-token arg) return-location)))
         (list (compute 'negq return-location))))
       ((list 'read)
-       (list (compute 'callq 'read_int)
-             (move "rax" return-location)))
+       (cons (compute 'callq 'read_int)
+             (if (= num rax-number) null (list (move "rax" return-location)))))
       (v (if (and (symbol? v) (= (variable->number v) num))
              null
              (list (move (make-token v) return-location))))))
@@ -47,5 +47,5 @@
   handle)
 
 ;;This package is installed when the module is instantiated.
-(install 'selector (list/c (-> any/c argument?) (-> any/c exact-integer?))
+(install 'selector (list/c (-> any/c argument?) (-> any/c exact-integer?) exact-integer?)
          (cons 'make-instruction-selector (lambda (ls) (apply make-instruction-selector ls))))
