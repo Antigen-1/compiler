@@ -1,9 +1,9 @@
 #lang racket/base
-(require racket/contract racket/match racket/dict racket/string racket/set racket/list
+(require racket/contract racket/match racket/dict racket/string racket/set racket/list racket/bool
          graph
          "pkg.rkt" "selector.rkt" "instruction.rkt" "support/priority_queue.rkt"
          (for-syntax racket/base))
-(provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All)
+(provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All number:register register:number)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
@@ -99,6 +99,12 @@
 (define caller-saved-registers '("rax" "rcx" "rdx" "rsi" "rdi" "r8" "r9" "r10" "r11"))
 (define callee-saved-registers '("rsp" "rbp" "rbx" "r12" "r13" "r14" "r15"))
 (define argument-passing-registers '("rdi" "rsi" "rdx" "rcx" "r8" "r9"))
+;;All keys are interned.
+(define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int reg) ...) (hasheq (~@ reg int) ...)))
+(define-values (number:register register:number)
+  (make-mapping
+   (-5 "r15") (-4 "r11") (-3 "rbp") (-2 "rsp") (-1 "rax")
+   (0 "rcx") (1 "rdx") (2 "rsi") (3 "rdi") (4 "r8") (5 "r9") (6 "r10") (7 "rbx") (8 "r12") (9 "r13") (10 "r14")))
 
 ;;common contracts
 (define assign? (list/c 'define symbol? atomic?))
@@ -225,14 +231,13 @@
                       (handle 0 last-expr))))))))
   #; (-> Cvar Cvar_conflicts)
   ;; Including `uncover-live` pass and `build-interference` pass
-  ;; The `regs` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
-  ;; Strings in this set MUST be interned.
-  (define/contract (find-conflicts form (regs (seteq)))
-    (-> any/c (set/c string? #:cmp 'eq #:kind 'immutable) any)
+  ;; The `locs` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
+  (define/contract (find-conflicts form (locs (seteq)))
+    (-> any/c (set/c exact-integer? #:cmp 'eq #:kind 'immutable) any)
     (define (left-hand st)
       (match st
         ((list 'define var _) var)
-        ((list 'return _) "rax")))
+        ((list 'return _) -1)))
     (define (right-hand st)
       (match st
         ((list 'define _ e) e)
@@ -243,7 +248,7 @@
       (define registers
         (let ((r (right-hand st)))
           (if (or (primitive? r) (eq? (car r) '+) (eq? (car r) '-)) null caller-saved-registers)))
-      (list->seteq (cons base registers)))
+      (list->seteq (cons base (map (lambda (reg) (hash-ref register:number reg)) registers))))
     (define (R st)
       (define base (right-hand st))
       (cond ((symbol? base) (seteq base))
@@ -253,12 +258,12 @@
             (else
              (define registers
                (take argument-passing-registers (min 6 (length (cdr base)))))
-             (list->seteq (append registers (filter symbol? (cdr base)))))))
+             (list->seteq (append (map (lambda (reg) (hash-ref register:number reg)) registers) (filter symbol? (cdr base)))))))
     
     (define (uncover-live sts)
       (reverse
        (cdr
-        (for/fold ((ac (list regs)))
+        (for/fold ((ac (list locs)))
                   ((st (in-list (reverse sts))))
           (define write-set (W st))
           (define read-set (R st))
@@ -271,7 +276,7 @@
            ((list live write read)
             (for/fold ((s s)) ((wloc (in-set write)))
               (for/fold ((s s)) ((lloc (in-set live)))
-                (cond ((eq? wloc lloc) s) (else (set-add s (list wloc lloc)))))))))))
+                (cond ((or (nor (symbol? wloc) (symbol? lloc)) (eq? wloc lloc)) s) (else (set-add s (list wloc lloc)))))))))))
     
     (match form
       ((list 'program (list 'start statements))
@@ -292,14 +297,7 @@
   (define (allocate-registers form)
     (match form
       ((list 'program (list (cons 'conflicts graph)) (list 'start statements))
-       ;;All keys are interned.
-       (define-syntax-rule (make-mapping (int reg) ...) (values (hasheq (~@ int reg) ...) (hasheq (~@ reg int) ...)))
-       (define-values (number->register register->number)
-         (make-mapping
-          (-5 "r15") (-4 "r11") (-3 "rbp") (-2 "rsp") (-1 "rax")
-          (0 "rcx") (1 "rdx") (2 "rsi") (3 "rdi") (4 "r8") (5 "r9") (6 "r10") (7 "rbx") (8 "r12") (9 "r13") (10 "r14")))
-       
-       (define-values (registers identifiers) (partition register? (get-vertices graph)))
+       (define identifiers (filter symbol? (get-vertices graph)))
        
        (define saturation-table (make-hasheq))
        (define exclusion-table (make-hasheq))
@@ -313,8 +311,7 @@
          (hash-set! exclusion-table id new-set)
          (hash-set! saturation-table id (set-count new-set)))
        (define (count id)
-         (define rs (filter (lambda (reg) (has-edge? graph reg id)) registers))
-         (define new-set (list->seteq (map (lambda (reg) (hash-ref register->number reg)) rs)))
+         (define new-set (list->seteq (filter-not symbol? (get-neighbors graph id))))
          (hash-set! saturation-table id (set-count new-set))
          (hash-set! exclusion-table id new-set))
 
@@ -331,7 +328,7 @@
              (for ((n (in-naturals)))
                (cond ((not (set-member? exclusion n)) (ret n))))))
          (for ((n (in-neighbors graph var)))
-           (cond ((not (register? n))
+           (cond ((symbol? n)
                   (update n num)
                   (pqueue-decrease-key! pqueue (hash-ref handles-mapping n)))))
          num)
@@ -342,18 +339,18 @@
                   (hash-set! location-table v (color v))
                   (loop (sub1 c))))))
 
+       (define vals (hash-values location-table))
        (define callee-saved-registers-in-use
-         (set->list (list->seteq (map (lambda (int) (hash-ref number->register int)) (filter (lambda (int) (and (>= int 7) (<= int 10))) (hash-values location-table))))))
+         (set->list (list->seteq (map (lambda (int) (hash-ref number:register int)) (filter (lambda (int) (and (>= int 7) (<= int 10))) vals)))))
        (define stack-size
-         (let ((vals (hash-values location-table)))
-           (if (null? vals) 0
-               (let ((m (argmax values vals)))
-                 (if (> m 10) (* 8 (- m 10)) 0)))))
+         (if (null? vals) 0
+             (let ((m (argmax values vals)))
+               (if (> m 10) (* 8 (- m 10)) 0))))
 
        (define base (length callee-saved-registers-in-use))
        
        (define (number->location num)
-         (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) "rbp")) (list '~r (hash-ref number->register num))))
+         (if (> num 10) (list '~a (cons (* -8 (+ base (- num 10))) "rbp")) (list '~r (hash-ref number:register num))))
        (define (variable->number var)
          (hash-ref location-table var (lambda () (raise (make-exn:fail:contract:variable var "There is no location allocated for this variable" (current-continuation-marks))))))
        
@@ -497,7 +494,7 @@
                                     (list 'Lvar 'remove-complex-operands #t)
                                     (list 'Lvar_mon 'explicate-control #t)
                                     (list 'Cvar 'partial-evaluate #f)
-                                    (list 'Cvar 'find-conflicts #t (seteq "rsp" "rax"))
+                                    (list 'Cvar 'find-conflicts #t (seteq -2 -1))
                                     (list 'Cvar_conflicts 'allocate-registers #t)
                                     (list 'X86int 'patch-instructions #t)
                                     (list 'X86int 'assign-home #t)
