@@ -253,7 +253,7 @@
             (else
              (define registers
                (take argument-passing-registers (min 6 (length (cdr base)))))
-             (list->seteq registers))))
+             (list->seteq (append registers (filter symbol? (cdr base)))))))
     
     (define (uncover-live sts)
       (reverse
