@@ -225,10 +225,10 @@
                       (handle 0 last-expr))))))))
   #; (-> Cvar Cvar_conflicts)
   ;; Including `uncover-live` pass and `build-interference` pass
-  ;; The `live` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
-  ;; So it is much more secure to use lists as sets or build hash sets with `set`, using `equal?` to compare elements.
-  ;; Hash sets built with `mutable-set` are also allowed, but not preferred.
-  (define (find-conflicts form (live (set)))
+  ;; The `regs` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
+  ;; Strings in this set MUST be interned.
+  (define/contract (find-conflicts form (regs (seteq)))
+    (-> any/c (set/c string? #:cmp 'eq #:kind 'immutable) any)
     (define (left-hand st)
       (match st
         ((list 'define var _) var)
@@ -243,21 +243,22 @@
       (define registers
         (let ((r (right-hand st)))
           (if (or (primitive? r) (eq? (car r) '+) (eq? (car r) '-)) null caller-saved-registers)))
-      (list->set (cons base registers)))
+      (list->seteq (cons base registers)))
     (define (R st)
       (define base (right-hand st))
-      (cond ((symbol? base) (set base))
-            ((primitive? base) (set))
+      (cond ((symbol? base) (seteq base))
+            ((primitive? base) (seteq))
+            ((or (eq? (car base) '+) (eq? (car base) '-))
+             (list->seteq (filter symbol? (cdr base))))
             (else
              (define registers
-               (if (or (eq? (car base) '+) (eq? (car base) '-))
-                   null (take argument-passing-registers (min 6 (length (cdr base))))))
-             (list->set (append registers (filter symbol? (cdr base)))))))
+               (take argument-passing-registers (min 6 (length (cdr base)))))
+             (list->seteq registers))))
     
     (define (uncover-live sts)
       (reverse
        (cdr
-        (for/fold ((ac (list live)))
+        (for/fold ((ac (list regs)))
                   ((st (in-list (reverse sts))))
           (define write-set (W st))
           (define read-set (R st))
@@ -270,7 +271,7 @@
            ((list live write read)
             (for/fold ((s s)) ((wloc (in-set write)))
               (for/fold ((s s)) ((lloc (in-set live)))
-                (cond ((equal? wloc lloc) s) (else (set-add s (list wloc lloc)))))))))))
+                (cond ((eq? wloc lloc) s) (else (set-add s (list wloc lloc)))))))))))
     
     (match form
       ((list 'program (list 'start statements))
@@ -496,7 +497,7 @@
                                     (list 'Lvar 'remove-complex-operands #t)
                                     (list 'Lvar_mon 'explicate-control #t)
                                     (list 'Cvar 'partial-evaluate #f)
-                                    (list 'Cvar 'find-conflicts #t (set "rsp" "rax"))
+                                    (list 'Cvar 'find-conflicts #t (seteq "rsp" "rax"))
                                     (list 'Cvar_conflicts 'allocate-registers #t)
                                     (list 'X86int 'patch-instructions #t)
                                     (list 'X86int 'assign-home #t)
