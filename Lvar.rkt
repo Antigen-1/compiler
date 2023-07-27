@@ -3,7 +3,8 @@
          graph
          "pkg.rkt" "selector.rkt" "instruction.rkt" "support/priority_queue.rkt"
          (for-syntax racket/base))
-(provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-All number:register register:number)
+(provide install-Lvar install-Lvar_mon install-Cvar install-X86raw install-X86int install-Cvar_conflicts
+         number:register register:number)
 
 (define (install-language name contract interpreter . passes)
   (apply install name contract (cons 'interpret interpreter) passes))
@@ -446,59 +447,4 @@
     (string-append* (cons (format ".global ~a\n" (resolve-label 'main)) (map block->string (cdr form)))))
   
   (apply install 'X86raw form? (pairify make-text)))
-;;------------------------------------------------------------------------------------
-
-;;All
-;;------------------------------------------------------------------------------------
-(define (install-All name)
-  (install 'compiler (listof (cons/c (and/c tag? installed?) (cons/c tag? (cons/c boolean? list?))))
-           (cons 'make-compiler
-                 (lambda (l)
-                   (lambda (i (f #t))
-                     (foldl
-                      (lambda (p i) (if (or f (caddr p)) (apply apply-generic (cadr p) (tag (car p) i) (cdddr p)) i))
-                      i l)))))
-  (define table
-    (hasheq 'Lvar1
-            (lambda ()
-              (install-Lvar)
-              (install-Lvar_mon)
-              (install-Cvar)
-              (install-X86int)
-              (install-X86raw)
-              
-              (apply-generic 'make-compiler
-                             (tag
-                              'compiler
-                              (list (list 'Lvar 'uniquify #t)
-                                    (list 'Lvar 'remove-complex-operands #t)
-                                    (list 'Lvar_mon 'explicate-control #t)
-                                    (list 'Cvar 'partial-evaluate #f)
-                                    (list 'Cvar 'select-instructions #t)
-                                    (list 'X86int 'patch-instructions #t)
-                                    (list 'X86int 'assign-home #t)
-                                    (list 'X86raw 'make-text #t)))))
-            'Lvar2
-            (lambda ()
-              (install-Lvar)
-              (install-Lvar_mon)
-              (install-Cvar)
-              (install-Cvar_conflicts)
-              (install-X86int)
-              (install-X86raw)
-
-              (apply-generic 'make-compiler
-                             (tag
-                              'compiler
-                              (list (list 'Lvar 'uniquify #t)
-                                    (list 'Lvar 'remove-complex-operands #t)
-                                    (list 'Lvar_mon 'explicate-control #t)
-                                    (list 'Cvar 'partial-evaluate #f)
-                                    (list 'Cvar 'find-conflicts #t (seteq -2 -1))
-                                    (list 'Cvar_conflicts 'allocate-registers #t)
-                                    (list 'X86int 'patch-instructions #t)
-                                    (list 'X86int 'assign-home #t)
-                                    (list 'X86raw 'make-text #t)))))))
-  
-  ((hash-ref table name)))
 ;;------------------------------------------------------------------------------------

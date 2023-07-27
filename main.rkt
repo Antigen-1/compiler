@@ -34,17 +34,60 @@
 
   (check-equal? (+ 2 2) 4))
 
-(module+ main
-  ;; (Optional) main submodule. Put code here if you need it to be executed when
-  ;; this file is run using DrRacket or the `racket` executable.  The code here
-  ;; does not run when this file is required by another module. Documentation:
-  ;; http://docs.racket-lang.org/guide/Module_Syntax.html#%28part._main-and-test%29
+(require "pkg.rkt" "Lvar.rkt" racket/contract racket/set)
 
-  (require racket/cmdline)
-  (define who (box "world"))
-  (command-line
-    #:program "my-program"
-    #:once-each
-    [("-n" "--name") name "Who to say hello to" (set-box! who name)]
-    #:args ()
-    (printf "hello ~a~n" (unbox who))))
+;;All
+;;------------------------------------------------------------------------------------
+(define (install-All name)
+  (install 'compiler (listof (cons/c (and/c tag? installed?) (cons/c tag? (cons/c boolean? list?))))
+           (cons 'make-compiler
+                 (lambda (l)
+                   (lambda (i (f #t))
+                     (foldl
+                      (lambda (p i) (if (or f (caddr p)) (apply apply-generic (cadr p) (tag (car p) i) (cdddr p)) i))
+                      i l)))))
+  (define table
+    (hasheq 'Lvar1
+            (lambda ()
+              (install-Lvar)
+              (install-Lvar_mon)
+              (install-Cvar)
+              (install-X86int)
+              (install-X86raw)
+              
+              (apply-generic 'make-compiler
+                             (tag
+                              'compiler
+                              (list (list 'Lvar 'uniquify #t)
+                                    (list 'Lvar 'remove-complex-operands #t)
+                                    (list 'Lvar_mon 'explicate-control #t)
+                                    (list 'Cvar 'partial-evaluate #f)
+                                    (list 'Cvar 'select-instructions #t)
+                                    (list 'X86int 'patch-instructions #t)
+                                    (list 'X86int 'assign-home #t)
+                                    (list 'X86raw 'make-text #t)))))
+            'Lvar2
+            (lambda ()
+              (install-Lvar)
+              (install-Lvar_mon)
+              (install-Cvar)
+              (install-Cvar_conflicts)
+              (install-X86int)
+              (install-X86raw)
+
+              (apply-generic 'make-compiler
+                             (tag
+                              'compiler
+                              (list (list 'Lvar 'uniquify #t)
+                                    (list 'Lvar 'remove-complex-operands #t)
+                                    (list 'Lvar_mon 'explicate-control #t)
+                                    (list 'Cvar 'partial-evaluate #f)
+                                    (list 'Cvar 'find-conflicts #t (seteq -2 -1))
+                                    (list 'Cvar_conflicts 'allocate-registers #t)
+                                    (list 'X86int 'patch-instructions #t)
+                                    (list 'X86int 'assign-home #t)
+                                    (list 'X86raw 'make-text #t)))))))
+  
+  ((hash-ref table name)))
+;;------------------------------------------------------------------------------------
+
