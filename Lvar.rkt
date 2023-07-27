@@ -234,7 +234,7 @@
   ;; Including `uncover-live` pass and `build-interference` pass
   ;; The `locs` argument is used to pass live-after sets when the flow jumps from the `start` block to another block.
   (define/contract (find-conflicts form (locs (seteq)))
-    (-> any/c (set/c exact-integer? #:cmp 'eq #:kind 'immutable) any)
+    (->* (any/c) ((set/c exact-integer? #:cmp 'eq #:kind 'immutable)) any)
     (define (left-hand st)
       (match st
         ((list 'define var _) var)
