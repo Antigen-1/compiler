@@ -35,6 +35,7 @@
   (check-equal? (+ 2 2) 4))
 
 (require "pkg.rkt" "Lvar.rkt" racket/contract racket/set)
+(provide install-All)
 
 ;;All
 ;;------------------------------------------------------------------------------------
