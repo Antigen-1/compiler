@@ -244,22 +244,23 @@
         ((list 'define _ e) e)
         ((list 'return e) e)))
 
-    (define (W st)
-      (define base (left-hand st))
+    ;; analyze the continuation 
+    ;; locations storing results 
+    (define (W st) (seteq (left-hand st)))
+    ;; locations (maybe) written temporarily
+    (define (T st)
       (define registers
         (let ((r (right-hand st)))
-          (if (or (primitive? r) (eq? (car r) '+) (eq? (car r) '-)) null caller-saved-registers)))
-      (list->seteq (cons base (map (lambda (reg) (hash-ref register:number reg)) registers))))
+          (cond ((primitive? r) null)
+                ((or (eq? (car r) '+) (eq? (car r) '-)) '("rax"))
+                (else caller-saved-registers))))
+      (list->seteq (map (lambda (reg) (hash-ref register:number reg)) registers)))
+    ;; locations being read
     (define (R st)
       (define base (right-hand st))
       (cond ((symbol? base) (seteq base))
             ((primitive? base) (seteq))
-            ((or (eq? (car base) '+) (eq? (car base) '-))
-             (list->seteq (filter symbol? (cdr base))))
-            (else
-             (define registers
-               (take argument-passing-registers (min 6 (length (cdr base)))))
-             (list->seteq (append (map (lambda (reg) (hash-ref register:number reg)) registers) (filter symbol? (cdr base)))))))
+            (else (list->seteq (filter symbol? (cdr base))))))
     
     (define (uncover-live sts)
       (reverse
@@ -267,16 +268,17 @@
         (for/fold ((ac (list locs)))
                   ((st (in-list (reverse sts))))
           (define write-set (W st))
+          (define temp-set (T st))
           (define read-set (R st))
-          (cons (set-union (set-subtract (car ac) write-set) read-set) (cons (list (car ac) write-set read-set) (cdr ac)))))))
+          (cons (set-union (set-subtract (car ac) write-set) read-set) (cons (list (car ac) write-set temp-set) (cdr ac)))))))
 
     (define (build-interference ls)
       (undirected-graph
        (for/fold ((s null)) ((l (in-list ls)))
          (match l
-           ((list live write read)
-            (for/fold ((s s)) ((wloc (in-set write)))
-              (for/fold ((s s)) ((lloc (in-set live)))
+           ((list live write temp)
+            (for/fold ((s s)) ((wloc (in-set (set-union write temp))))
+              (for/fold ((s s)) ((lloc (in-set (set-subtract live write))))
                 (cond ((or (nor (symbol? wloc) (symbol? lloc)) (eq? wloc lloc)) s) (else (set-add s (list wloc lloc)))))))))))
     
     (match form

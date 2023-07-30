@@ -8,7 +8,12 @@
     (if (symbol? p) (number->location (variable->number p)) p))
 
   (define primitive? (or/c symbol? fixnum?))
-  
+
+  ;;1.Read from locations.
+  ;;2.Handle values and locations. Temporary locations may be needed.
+  ;;3.Write to locations.
+  ;;The first two steps are optional, whereas the last one is necessary.
+  ;;We suppose that there is a one-to-one match between numbers and locations.
   (define/contract (handle ret expr)
     (-> (or/c symbol? exact-integer?) (or/c primitive?
                                             (list/c '+ primitive? primitive?)
